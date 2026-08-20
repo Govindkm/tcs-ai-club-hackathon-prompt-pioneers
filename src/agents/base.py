@@ -8,6 +8,7 @@ Wires two distinct Strands concepts per agent:
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any, Callable
 
 import yaml
 from strands import Agent
@@ -30,8 +31,17 @@ def _load_agent_config(agent_key: str) -> dict:
     return config[agent_key]
 
 
-def build_agent(agent_key: str, system_prompt: str | None = None) -> Agent:
-    """Build a Strands Agent wired to the tools/skills declared for it in config/agents.yaml."""
+def build_agent(
+    agent_key: str,
+    system_prompt: str | None = None,
+    callback_handler: Callable[..., Any] | None = None,
+) -> Agent:
+    """Build a Strands Agent wired to the tools/skills declared for it in config/agents.yaml.
+
+    callback_handler, if given, receives streamed reasoning/text/tool-use events
+    during every call to this agent (see strands.handlers.callback_handler for
+    the event shape) - used to surface "AI thinking" to a human reviewer.
+    """
     setup_telemetry()
     cfg = _load_agent_config(agent_key)
     tools = get_tools(*cfg.get("tools", []))
@@ -42,6 +52,10 @@ def build_agent(agent_key: str, system_prompt: str | None = None) -> Agent:
         skill_paths = [str(_SKILLS_DIR / name) for name in skill_names]
         plugins.append(AgentSkills(skills=skill_paths))
 
+    agent_kwargs: dict[str, Any] = {}
+    if callback_handler is not None:
+        agent_kwargs["callback_handler"] = callback_handler
+
     return Agent(
         model=get_model(),
         tools=tools,
@@ -49,4 +63,5 @@ def build_agent(agent_key: str, system_prompt: str | None = None) -> Agent:
         system_prompt=system_prompt or cfg.get("description", ""),
         name=agent_key,
         trace_attributes={"app.name": "prompt-pioneers-poc", "agent.key": agent_key},
+        **agent_kwargs,
     )

@@ -1,14 +1,15 @@
-"""Login and self-registration views.
+"""Login and self-registration views - thin wrappers around the backend API.
 
-Self-registration always creates an 'applicant' account - admin accounts are
-provisioned separately (see scripts/seed_db.py) to avoid privilege escalation.
+Self-registration always creates an 'applicant' account (enforced server-side
+in backend/app/api/auth.py) - admin accounts are provisioned separately (see
+scripts/seed_db.py) to avoid privilege escalation.
 """
 from __future__ import annotations
 
 import streamlit as st
 
-from app.state import set_current_user
-from src.db import repository as db
+from app.api_client import BackendError
+from app.state import get_client, set_session
 
 
 def login_view() -> None:
@@ -18,12 +19,13 @@ def login_view() -> None:
         password = st.text_input("Password", type="password")
         submitted = st.form_submit_button("Log in")
     if submitted:
-        user = db.authenticate(username, password)
-        if user:
-            set_current_user(user)
-            st.rerun()
-        else:
-            st.error("Invalid username or password.")
+        try:
+            result = get_client().login(username, password)
+        except BackendError as exc:
+            st.error(str(exc))
+            return
+        set_session(result["user"], result["access_token"])
+        st.rerun()
 
 
 def register_view() -> None:
@@ -43,7 +45,7 @@ def register_view() -> None:
             st.error("Password must be at least 8 characters.")
         else:
             try:
-                db.create_user(username=username, password=password, full_name=full_name, role="applicant")
+                get_client().register(username, password, full_name)
                 st.success("Account created. You can now log in from the Log in tab.")
-            except ValueError as exc:
+            except BackendError as exc:
                 st.error(str(exc))

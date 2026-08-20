@@ -98,13 +98,24 @@ The POC must demonstrate every normalized capability from the eight relevant pro
 │   │   ├── scoring_tools.py       # Configurable rules + explainable scoring tools
 │   │   └── workflow_tools.py      # Reviewer routing, decision recording, audit trail
 │   ├── db/                 # SQLite schema + repository (users, schemes, submissions, reviews, notifications)
-│   ├── ingestion/         # Submission intake & heterogeneous document handling
+│   ├── ingestion/         # Heterogeneous file/zip extraction (document_reader.py) + vision OCR (vision.py)
 │   ├── analytics/         # Operational analytics & reporting
 │   ├── adapters/          # Mock adapters (schemes portal, messaging, identity)
 │   └── telemetry.py        # OpenTelemetry tracing setup (console/OTLP exporters)
 ├── scripts/
 │   ├── seed_db.py             # Creates a default admin user + sample schemes
 │   └── run_pipeline_demo.py  # End-to-end demo of the agent pipeline
+├── backend/
+│   └── app/
+│       ├── main.py                # FastAPI entrypoint (uvicorn backend.app.main:app)
+│       ├── security.py            # JWT auth (create/verify token, get_current_user, require_role)
+│       ├── schemas.py             # Pydantic request/response models
+│       └── api/                   # Routers: auth, schemes, applications, reviews, notifications, health
+├── app/                    # Streamlit portal - thin client only, calls the API via api_client.py
+│   ├── api_client.py               # BackendClient: the only thing views use to talk to the backend
+│   ├── state.py                    # Session-state helpers (current user + BackendClient instance)
+│   └── views/                      # auth, applicant, admin, notifications views (no business logic)
+├── streamlit_app.py        # Streamlit entrypoint (streamlit run streamlit_app.py)
 ├── notebooks/             # Model/evaluation notebooks
 ├── tests/                 # Automated tests for critical paths
 ├── .env.example           # Model provider credentials/config template
@@ -112,6 +123,51 @@ The POC must demonstrate every normalized capability from the eight relevant pro
 ├── requirements.txt
 └── README.md
 ```
+
+## Architecture: API-first (FastAPI backend, thin Streamlit client)
+
+All application-processing logic (extraction, validation, scoring, review, audit,
+notifications) lives behind a [FastAPI](https://fastapi.tiangolo.com/) backend
+([backend/app/](backend/app), run with `uvicorn backend.app.main:app`). The Streamlit
+app is a **thin client only** — it never imports `src.db`/`src.tools`/`src.ingestion`
+directly; every view calls [app/api_client.py](app/api_client.py)'s `BackendClient`, which
+speaks plain REST/JSON to the API. This means Streamlit can be deleted and replaced with
+React/mobile/a government portal without touching any business logic.
+
+```
+Streamlit UI  ──REST/JSON──▶  FastAPI (backend/app)  ──▶  src/db, src/tools,
+(thin client)                 auth · applications ·        src/ingestion, src/agents
+                               reviews · schemes ·
+                               notifications · health
+```
+
+Auth is JWT-based (`backend/app/security.py`): `POST /api/v1/auth/login` returns a bearer
+token carrying `id`/`username`/`role`, sent as `Authorization: Bearer <token>` on every
+subsequent request; `require_role("admin")` gates admin-only endpoints. Submission ownership
+is enforced server-side (`GET /api/v1/applications/{id}` 403s for non-owners/non-admins),
+so the UI layer can never be the only thing protecting a permission boundary. See the
+auto-generated OpenAPI docs at `http://localhost:8000/docs` once the backend is running.
+
+## Ingestion (Heterogeneous Submissions)
+
+[src/ingestion/document_reader.py](src/ingestion/document_reader.py) extracts plain text
+from whatever mix of files an applicant submits, dispatching by extension:
+
+| Type | Strategy |
+|---|---|
+| `.txt` / `.csv` | Read directly |
+| `.pdf` | Extract the text layer per page (PyMuPDF); pages with little/no text (scanned) fall back to rendering the page as an image and running vision-OCR |
+| `.docx` | Extract paragraph text + OCR any embedded images |
+| `.pptx` | Extract slide text + OCR any embedded images |
+| `.xlsx` | Dump all sheets/cells as text |
+| `.png` / `.jpg` / `.jpeg` / `.bmp` / `.tiff` / `.webp` | Vision-OCR the whole image |
+| `.zip` | Recursively extract every entry above (e.g. a whole submission folder), with entry-count/size/nesting-depth limits to prevent zip-bomb style DoS |
+
+Vision-OCR ([src/ingestion/vision.py](src/ingestion/vision.py)) calls a local Ollama vision
+model (`OLLAMA_HOST` + `OLLAMA_VISION_MODEL` in `.env`, default `minicpm-v` - strong OCR on
+dense document scans; `moondream` is a faster/lighter alternative, `llama3.2-vision` a
+heavier general-purpose one). Pull whichever model you configure, e.g. `ollama pull minicpm-v`
+(the [Colab notebook](notebooks/colab_ollama_server.ipynb) has a cell for this).
 
 ## Agents, Tools & Skills (Strands Agents SDK)
 
@@ -154,10 +210,11 @@ attributable per agent. Controlled via `.env`:
   `OTEL_EXPORTER_OTLP_HEADERS` env vars.
 - `OTEL_SERVICE_NAME` — service name attached to all spans.
 
-## Portal (Streamlit + SQLite)
+## Portal (Streamlit thin client + FastAPI + SQLite)
 
-A [Streamlit](https://streamlit.io/) portal ([streamlit_app.py](streamlit_app.py)) backed by a
-local SQLite database ([src/db/](src/db)) provides registration/login and role-based access:
+The [Streamlit](https://streamlit.io/) portal ([streamlit_app.py](streamlit_app.py)) is a thin
+client (see architecture section above) over the FastAPI backend, which persists to a local
+SQLite database ([src/db/](src/db)). It provides registration/login and role-based access:
 
 - **Applicants** (self-registered) can browse open schemes, submit applications, and track
   only their own submissions' status — including the final decision once a case is closed.
@@ -166,10 +223,30 @@ local SQLite database ([src/db/](src/db)) provides registration/login and role-b
   request more info) with a mandatory rationale, manage schemes, and publish notifications
   shown to all users.
 
-On submission, the deterministic `document_tools` / `validation_tools` / `scoring_tools`
-functions run automatically (no LLM credentials needed) to pre-fill extraction, validation,
-and an explainable advisory score for the reviewer — the reviewer's decision is always what
-actually changes a case's status.
+Every submission runs through the real **agentic** extraction → validation → scoring
+pipeline (`src/agents/orchestrator.py`, requires a configured `STRANDS_MODEL_PROVIDER`) —
+each stage is a Strands `Agent` that reasons and uses its own tools/skills, finishing with
+a validated structured result via `Agent.structured_output(...)` so it can still be stored
+and rendered. The reviewer's decision is always what actually changes a case's status — the
+agents only produce advisory output.
+
+### Async analysis job + live AI reasoning log
+
+The pipeline runs as a **background job** (FastAPI `BackgroundTasks`), not inline in the
+request: `POST /applications` and `POST /applications/{id}/analyze` return immediately with
+`analysis_status="queued"`, while the job progresses through `running` (tagged with the
+current `analysis_stage`: extraction/validation/scoring) to `completed` or `failed`. Poll
+`GET /applications/{id}` or the lighter `GET /applications/{id}/status` for progress.
+
+Every stage agent streams its reasoning/tool-use back through a `callback_handler`
+(`src/agents/orchestrator.py`), which is persisted to an `analysis_events` table as it
+happens — so admins can watch **how** the AI reached its answer, not just the final
+result, via `GET /applications/{id}/events` (history) or the live
+`GET /applications/{id}/events/stream` (Server-Sent Events). In the Streamlit admin view,
+each submission has a "🧠 AI reasoning & thinking" log (refresh to see progress) and a
+feedback box that lets an admin steer a re-analysis with human-in-the-loop guidance
+(`POST /applications/{id}/analyze` with `{"feedback": "..."}`), which gets included in the
+next prompt sent to each agent.
 
 ## Getting Started
 
@@ -177,21 +254,25 @@ actually changes a case's status.
 # 1. Install dependencies
 pip install -r requirements.txt
 
-# 2. Configure model provider credentials (only needed for the agent/LLM demo, not the portal)
+# 2. Configure environment
 Copy-Item .env.example .env
-# edit .env: set STRANDS_MODEL_PROVIDER and the matching credentials
-# (use Ollama/Bedrock with local/on-prem access for restricted data)
+# edit .env: set JWT_SECRET_KEY (any random string) for stable sessions across restarts,
+# and STRANDS_MODEL_PROVIDER + credentials - required for submissions, since each one
+# runs through the real agentic analysis pipeline (Ollama is the easiest local/free option)
 
-# 3. Run unit tests (no live model calls)
+# 3. Run unit tests (no live model/backend calls needed)
 pytest
 
 # 4. Seed the local SQLite DB with a default admin user + sample schemes
 python scripts/seed_db.py
 
-# 5. Launch the Streamlit portal
+# 5. Start the FastAPI backend (owns all business logic)
+uvicorn backend.app.main:app --reload
+
+# 6. In a second terminal, launch the Streamlit thin client
 streamlit run streamlit_app.py
 
-# 6. (Optional) Run the end-to-end LLM agent pipeline demo (requires model credentials)
+# 7. (Optional) Run the end-to-end LLM agent pipeline demo (requires model credentials)
 python scripts/run_pipeline_demo.py
 ```
 

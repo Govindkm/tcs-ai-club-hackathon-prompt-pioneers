@@ -3,11 +3,11 @@ from __future__ import annotations
 
 import streamlit as st
 
-from src.db import repository as db
+from app.state import get_client
 
 
 def notifications_banner() -> None:
-    notifications = db.list_active_notifications()
+    notifications = get_client().list_notifications()
     if not notifications:
         return
     with st.expander(f"📢 Notifications ({len(notifications)})"):

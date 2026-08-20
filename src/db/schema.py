@@ -32,6 +32,10 @@ CREATE TABLE IF NOT EXISTS submissions (
     document_text TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL DEFAULT 'submitted'
         CHECK (status IN ('submitted', 'under_review', 'needs_more_info', 'approved', 'rejected')),
+    analysis_status TEXT NOT NULL DEFAULT 'queued'
+        CHECK (analysis_status IN ('queued', 'running', 'completed', 'failed')),
+    analysis_stage TEXT,
+    analysis_error TEXT,
     extracted_fields TEXT,
     summary TEXT,
     validation_result TEXT,
@@ -39,6 +43,16 @@ CREATE TABLE IF NOT EXISTS submissions (
     score_explanation TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS analysis_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    submission_id INTEGER NOT NULL REFERENCES submissions(id),
+    stage TEXT NOT NULL,
+    event_type TEXT NOT NULL
+        CHECK (event_type IN ('stage_start', 'reasoning', 'text', 'tool_call', 'stage_complete', 'error')),
+    content TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS reviews (

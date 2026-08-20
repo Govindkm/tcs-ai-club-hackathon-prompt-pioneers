@@ -18,12 +18,18 @@ Submission date: 15/03/2026.
 Project description: Installation of solar micro-grids in three villages.
 """
 
+def _print_event(stage: str, event_type: str, content: str) -> None:
+    icon = {"stage_start": "▶", "reasoning": "🧠", "text": "💬", "tool_call": "🔧", "stage_complete": "✅"}.get(
+        event_type, "•"
+    )
+    print(f"{icon} [{stage}] {content}")
+
+
 if __name__ == "__main__":
-    pipeline = create_orchestrator()
+    pipeline = create_orchestrator(event_sink=_print_event)
     result = pipeline.process(
         document_text=SAMPLE_DOCUMENT,
         required_fields=["amounts_found", "dates_found"],
-        reviewer_pool=["reviewer_1", "reviewer_2"],
     )
     for stage, output in result.items():
         print(f"\n--- {stage.upper()} ---")

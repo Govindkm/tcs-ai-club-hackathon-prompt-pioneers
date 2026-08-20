@@ -1,4 +1,10 @@
-"""Streamlit entrypoint: run with `streamlit run streamlit_app.py`."""
+"""Streamlit entrypoint - a thin client for the FastAPI backend.
+
+Start the backend first (uvicorn backend.app.main:app --reload), then run
+this with `streamlit run streamlit_app.py`. This file (and everything under
+app/) must never import src.db/src.tools/src.ingestion directly - see
+app/api_client.py and backend/app/main.py.
+"""
 from __future__ import annotations
 
 import streamlit as st
@@ -8,12 +14,8 @@ from app.views.admin_views import admin_notifications_view, admin_schemes_view, 
 from app.views.applicant_views import my_submissions_view, schemes_view, submit_view
 from app.views.auth_views import login_view, register_view
 from app.views.notifications_view import notifications_banner
-from src.db.schema import init_db
-from src.telemetry import setup_telemetry
 
 st.set_page_config(page_title="Application Intelligence Platform", layout="wide")
-init_db()
-setup_telemetry()
 
 user = get_current_user()
 

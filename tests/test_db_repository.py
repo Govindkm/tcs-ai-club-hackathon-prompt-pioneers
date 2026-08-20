@@ -44,7 +44,10 @@ def test_submission_lifecycle_and_user_isolation():
     assert len(db.list_submissions_for_user(applicant_id)) == 1
     assert len(db.list_submissions_for_user(other_id)) == 0  # cannot see others' submissions
 
-    db.save_auto_analysis(
+    db.set_analysis_status(submission_id, "running", stage="extraction")
+    assert db.get_submission(submission_id)["analysis_status"] == "running"
+
+    db.save_analysis_result(
         submission_id,
         extracted_fields={"amounts_found": ["1,000"]},
         summary="Test summary.",
@@ -54,8 +57,14 @@ def test_submission_lifecycle_and_user_isolation():
     )
     updated = db.get_submission(submission_id)
     assert updated["status"] == "under_review"
+    assert updated["analysis_status"] == "completed"
     assert updated["score"] == 0.6
     assert updated["extracted_fields"] == {"amounts_found": ["1,000"]}
+
+    db.append_analysis_event(submission_id, "extraction", "reasoning", "Looking for monetary amounts...")
+    events = db.list_analysis_events(submission_id)
+    assert len(events) == 1
+    assert events[0]["event_type"] == "reasoning"
 
     db.record_review(submission_id, admin_id, "approved", "Meets all criteria")
     final = db.get_submission(submission_id)

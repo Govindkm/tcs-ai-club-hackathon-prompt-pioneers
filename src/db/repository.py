@@ -132,7 +132,20 @@ def create_submission(user_id: int, scheme_id: int, applicant_notes: str, docume
         conn.close()
 
 
-def save_auto_analysis(
+def update_submission_document_text(submission_id: int, document_text: str) -> None:
+    """Fill in the fully-extracted document text once the (potentially slow) ingestion stage completes."""
+    conn = get_connection()
+    try:
+        conn.execute(
+            "UPDATE submissions SET document_text = ?, updated_at = datetime('now') WHERE id = ?",
+            (document_text, submission_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def save_analysis_result(
     submission_id: int,
     extracted_fields: dict,
     summary: str,
@@ -140,12 +153,14 @@ def save_auto_analysis(
     score: float,
     score_explanation: dict,
 ) -> None:
+    """Persist the completed agentic analysis result and mark it as such."""
     conn = get_connection()
     try:
         conn.execute(
             "UPDATE submissions SET extracted_fields = ?, summary = ?, validation_result = ?, "
-            "score = ?, score_explanation = ?, status = 'under_review', updated_at = datetime('now') "
-            "WHERE id = ?",
+            "score = ?, score_explanation = ?, status = 'under_review', "
+            "analysis_status = 'completed', analysis_stage = 'done', analysis_error = NULL, "
+            "updated_at = datetime('now') WHERE id = ?",
             (
                 json.dumps(extracted_fields),
                 summary,
@@ -158,6 +173,47 @@ def save_auto_analysis(
         conn.commit()
     finally:
         conn.close()
+
+
+def set_analysis_status(
+    submission_id: int, analysis_status: str, stage: str | None = None, error: str | None = None
+) -> None:
+    """Update the in-progress analysis job's status/stage (queued/running/completed/failed)."""
+    conn = get_connection()
+    try:
+        conn.execute(
+            "UPDATE submissions SET analysis_status = ?, analysis_stage = COALESCE(?, analysis_stage), "
+            "analysis_error = ?, updated_at = datetime('now') WHERE id = ?",
+            (analysis_status, stage, error, submission_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def append_analysis_event(submission_id: int, stage: str, event_type: str, content: str) -> None:
+    """Record one step of an agent's reasoning/tool-use/output for later (or live) review."""
+    conn = get_connection()
+    try:
+        conn.execute(
+            "INSERT INTO analysis_events (submission_id, stage, event_type, content) VALUES (?, ?, ?, ?)",
+            (submission_id, stage, event_type, content),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def list_analysis_events(submission_id: int, after_id: int = 0) -> list[dict]:
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM analysis_events WHERE submission_id = ? AND id > ? ORDER BY id ASC",
+            (submission_id, after_id),
+        ).fetchall()
+    finally:
+        conn.close()
+    return [_row_to_dict(r) for r in rows]
 
 
 def get_submission(submission_id: int) -> dict | None:
