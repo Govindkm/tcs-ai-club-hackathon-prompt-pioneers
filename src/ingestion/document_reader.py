@@ -189,14 +189,141 @@ def _extract_pptx_text(file_bytes: bytes) -> str:
 
 
 def _extract_xlsx_text(file_bytes: bytes) -> str:
-    from openpyxl import load_workbook
+    import re
 
-    workbook = load_workbook(io.BytesIO(file_bytes), data_only=True, read_only=True)
+    from openpyxl import load_workbook
+    from openpyxl.utils.cell import range_boundaries
+
+    values_workbook = load_workbook(
+        io.BytesIO(file_bytes),
+        data_only=True,
+        read_only=False,
+    )
+
+    formulas_workbook = load_workbook(
+        io.BytesIO(file_bytes),
+        data_only=False,
+        read_only=False,
+    )
+
+    def calculate_cell(values_sheet, formulas_sheet, coordinate, stack=None):
+        stack = stack or set()
+
+        if coordinate in stack:
+            return formulas_sheet[coordinate].value
+
+        cached_value = values_sheet[coordinate].value
+        formula_value = formulas_sheet[coordinate].value
+
+        if cached_value is not None:
+            return cached_value
+
+        if not isinstance(formula_value, str) or not formula_value.startswith("="):
+            return formula_value
+
+        stack.add(coordinate)
+        expression = formula_value[1:].strip()
+
+        def calculate_sum(match):
+            start_cell = match.group(1)
+            end_cell = match.group(2)
+
+            min_col, min_row, max_col, max_row = range_boundaries(
+                f"{start_cell}:{end_cell}"
+            )
+
+            total = 0
+            for row in range(min_row, max_row + 1):
+                for column in range(min_col, max_col + 1):
+                    cell = formulas_sheet.cell(row=row, column=column)
+                    value = calculate_cell(
+                        values_sheet,
+                        formulas_sheet,
+                        cell.coordinate,
+                        stack,
+                    )
+
+                    if isinstance(value, (int, float)):
+                        total += value
+
+            return str(total)
+
+        expression = re.sub(
+            r"SUM\(\s*\$?([A-Z]+)\$?(\d+):\$?([A-Z]+)\$?(\d+)\s*\)",
+            lambda match: calculate_sum(
+                re.match(
+                    r"([A-Z]+\d+):([A-Z]+\d+)",
+                    f"{match.group(1)}{match.group(2)}:{match.group(3)}{match.group(4)}",
+                )
+            ),
+            expression,
+            flags=re.IGNORECASE,
+        )
+
+        def replace_cell_reference(match):
+            column = match.group(1)
+            row = match.group(2)
+            referenced_cell = f"{column}{row}"
+
+            value = calculate_cell(
+                values_sheet,
+                formulas_sheet,
+                referenced_cell,
+                stack,
+            )
+
+            return str(value) if isinstance(value, (int, float)) else "0"
+
+        expression = re.sub(
+            r"\$?([A-Z]{1,3})\$?(\d+)",
+            replace_cell_reference,
+            expression,
+            flags=re.IGNORECASE,
+        )
+
+        stack.remove(coordinate)
+
+        if not re.fullmatch(r"[0-9eE+\-*/().\s]+", expression):
+            return formula_value
+
+        try:
+            return eval(expression, {"__builtins__": {}}, {})
+        except (TypeError, ValueError, SyntaxError, ZeroDivisionError):
+            return formula_value
+
     sections = []
-    for sheet in workbook.worksheets:
-        rows = [
-            ", ".join("" if cell is None else str(cell) for cell in row)
-            for row in sheet.iter_rows(values_only=True)
-        ]
-        sections.append(f"[Sheet: {sheet.title}]\n" + "\n".join(rows))
+
+    try:
+        for values_sheet, formulas_sheet in zip(
+            values_workbook.worksheets,
+            formulas_workbook.worksheets,
+        ):
+            rows = []
+
+            for value_row, formula_row in zip(
+                values_sheet.iter_rows(),
+                formulas_sheet.iter_rows(),
+            ):
+                cells = []
+
+                for value_cell, formula_cell in zip(value_row, formula_row):
+                    value = calculate_cell(
+                        values_sheet,
+                        formulas_sheet,
+                        formula_cell.coordinate,
+                    )
+
+                    cells.append("" if value is None else str(value))
+
+                if any(cell != "" for cell in cells):
+                    rows.append(", ".join(cells))
+
+            sections.append(
+                f"[Sheet: {values_sheet.title}]\n" + "\n".join(rows)
+            )
+
+    finally:
+        values_workbook.close()
+        formulas_workbook.close()
+
     return "\n\n".join(sections)
