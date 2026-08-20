@@ -9,9 +9,11 @@ from app.views.applicant_views import my_submissions_view, schemes_view, submit_
 from app.views.auth_views import login_view, register_view
 from app.views.notifications_view import notifications_banner
 from src.db.schema import init_db
+from src.telemetry import setup_telemetry
 
 st.set_page_config(page_title="Application Intelligence Platform", layout="wide")
 init_db()
+setup_telemetry()
 
 user = get_current_user()
 

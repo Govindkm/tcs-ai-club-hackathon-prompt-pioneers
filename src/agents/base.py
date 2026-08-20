@@ -14,6 +14,7 @@ from strands import Agent
 from strands.vended_plugins.skills import AgentSkills
 
 from src.agents.model_provider import get_model
+from src.telemetry import setup_telemetry
 from src.tools import get_tools
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -31,6 +32,7 @@ def _load_agent_config(agent_key: str) -> dict:
 
 def build_agent(agent_key: str, system_prompt: str | None = None) -> Agent:
     """Build a Strands Agent wired to the tools/skills declared for it in config/agents.yaml."""
+    setup_telemetry()
     cfg = _load_agent_config(agent_key)
     tools = get_tools(*cfg.get("tools", []))
 
@@ -45,4 +47,6 @@ def build_agent(agent_key: str, system_prompt: str | None = None) -> Agent:
         tools=tools,
         plugins=plugins,
         system_prompt=system_prompt or cfg.get("description", ""),
+        name=agent_key,
+        trace_attributes={"app.name": "prompt-pioneers-poc", "agent.key": agent_key},
     )

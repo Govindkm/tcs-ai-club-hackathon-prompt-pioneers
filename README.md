@@ -100,7 +100,8 @@ The POC must demonstrate every normalized capability from the eight relevant pro
 │   ├── db/                 # SQLite schema + repository (users, schemes, submissions, reviews, notifications)
 │   ├── ingestion/         # Submission intake & heterogeneous document handling
 │   ├── analytics/         # Operational analytics & reporting
-│   └── adapters/          # Mock adapters (schemes portal, messaging, identity)
+│   ├── adapters/          # Mock adapters (schemes portal, messaging, identity)
+│   └── telemetry.py        # OpenTelemetry tracing setup (console/OTLP exporters)
 ├── scripts/
 │   ├── seed_db.py             # Creates a default admin user + sample schemes
 │   └── run_pipeline_demo.py  # End-to-end demo of the agent pipeline
@@ -137,6 +138,21 @@ Agent-to-tool/skill assignments are declared in [config/agents.yaml](config/agen
 wired in [src/agents/base.py](src/agents/base.py) so capabilities stay auditable — no tool
 can finalize an approval/rejection; human review is always required per the platform's
 core constraint.
+
+## Observability (Tracing & Telemetry)
+
+[src/telemetry.py](src/telemetry.py) configures Strands' built-in
+[OpenTelemetry tracing](https://strandsagents.com/docs/user-guide/observability-evaluation/traces/)
+via `StrandsTelemetry`, giving every agent run/model call/tool call a hierarchical trace.
+`build_agent()` calls it once (idempotent) before constructing any agent, and tags each
+agent with `name=<agent_key>` and `trace_attributes` (`app.name`, `agent.key`) so spans are
+attributable per agent. Controlled via `.env`:
+
+- `STRANDS_TRACE_CONSOLE` (default `true`) — print spans to the console for local debugging.
+- `STRANDS_TRACE_OTLP` (default `false`) — export spans to an OTLP collector (e.g. Jaeger,
+  Grafana Tempo). Configure the endpoint with the standard `OTEL_EXPORTER_OTLP_ENDPOINT` /
+  `OTEL_EXPORTER_OTLP_HEADERS` env vars.
+- `OTEL_SERVICE_NAME` — service name attached to all spans.
 
 ## Portal (Streamlit + SQLite)
 
