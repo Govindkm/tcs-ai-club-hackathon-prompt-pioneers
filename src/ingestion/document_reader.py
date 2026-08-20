@@ -114,10 +114,60 @@ def _extract_docx_text(file_bytes: bytes) -> str:
     import docx
 
     document = docx.Document(io.BytesIO(file_bytes))
-    sections = [p.text for p in document.paragraphs]
-    for rel in document.part.rels.values():
-        if "image" in rel.reltype:
-            sections.append(describe_image(rel.target_part.blob))
+    sections = []
+
+    # Extract normal paragraphs.
+    for paragraph in document.paragraphs:
+        text = paragraph.text.strip()
+        if text:
+            sections.append(text)
+
+    # Extract table rows and nested tables.
+    def extract_table(table):
+        table_text = []
+
+        for row in table.rows:
+            values = []
+
+            for cell in row.cells:
+                cell_text = cell.text.strip().replace("\n", " ")
+                if cell_text:
+                    values.append(cell_text)
+
+                for nested_table in cell.tables:
+                    nested_text = extract_table(nested_table)
+                    if nested_text:
+                        values.append(nested_text)
+
+            if values:
+                table_text.append(" | ".join(values))
+
+        return "\n".join(table_text)
+
+    for table in document.tables:
+        table_text = extract_table(table)
+        if table_text:
+            sections.append(table_text)
+
+    # Extract OCR text from embedded images.
+    processed_images = set()
+
+    for relationship in document.part.rels.values():
+        if "image" not in relationship.reltype:
+            continue
+
+        image_bytes = relationship.target_part.blob
+        image_id = hash(image_bytes)
+
+        if image_id in processed_images:
+            continue
+
+        processed_images.add(image_id)
+        image_text = describe_image(image_bytes).strip()
+
+        if image_text:
+            sections.append(image_text)
+
     return "\n".join(sections)
 
 
@@ -127,26 +177,217 @@ def _extract_pptx_text(file_bytes: bytes) -> str:
 
     presentation = Presentation(io.BytesIO(file_bytes))
     sections = []
+
     for slide_number, slide in enumerate(presentation.slides, start=1):
         slide_sections = [f"[Slide {slide_number}]"]
+
         for shape in slide.shapes:
             if shape.has_text_frame and shape.text_frame.text.strip():
-                slide_sections.append(shape.text_frame.text)
+                slide_sections.append(shape.text_frame.text.strip())
+
+            elif shape.shape_type == MSO_SHAPE_TYPE.CHART:
+                chart = shape.chart
+                chart_sections = ["[Chart]"]
+
+                if chart.has_title:
+                    title = chart.chart_title.text_frame.text.strip()
+                    if title:
+                        chart_sections[0] = f"[Chart: {title}]"
+
+                for plot in chart.plots:
+                    try:
+                        categories = list(plot.categories)
+                    except (AttributeError, ValueError):
+                        categories = []
+
+                    category_values = []
+                    for category in categories:
+                        try:
+                            value = category.label
+                        except (AttributeError, ValueError):
+                            value = None
+
+                        if value is None:
+                            try:
+                                value = category.value
+                            except (AttributeError, ValueError):
+                                value = None
+
+                        category_values.append("" if value is None else str(value))
+
+                    for series in plot.series:
+                        try:
+                            series_name = series.name
+                        except (AttributeError, ValueError):
+                            series_name = "Unnamed series"
+
+                        try:
+                            values = list(series.values)
+                        except (AttributeError, ValueError):
+                            values = []
+
+                        chart_sections.append(f"Series: {series_name}")
+
+                        if category_values:
+                            chart_sections.append(
+                                "Categories: " + ", ".join(category_values)
+                            )
+
+                        chart_sections.append(
+                            "Values: " + ", ".join(
+                                "" if value is None else str(value)
+                                for value in values
+                            )
+                        )
+
+                slide_sections.append("\n".join(chart_sections))
+
             elif shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
-                slide_sections.append(describe_image(shape.image.blob))
+                image_text = describe_image(shape.image.blob).strip()
+                if image_text:
+                    slide_sections.append(image_text)
+
         sections.append("\n".join(slide_sections))
+
     return "\n\n".join(sections)
 
 
 def _extract_xlsx_text(file_bytes: bytes) -> str:
-    from openpyxl import load_workbook
+    import re
 
-    workbook = load_workbook(io.BytesIO(file_bytes), data_only=True, read_only=True)
+    from openpyxl import load_workbook
+    from openpyxl.utils.cell import range_boundaries
+
+    values_workbook = load_workbook(
+        io.BytesIO(file_bytes),
+        data_only=True,
+        read_only=False,
+    )
+
+    formulas_workbook = load_workbook(
+        io.BytesIO(file_bytes),
+        data_only=False,
+        read_only=False,
+    )
+
+    def calculate_cell(values_sheet, formulas_sheet, coordinate, stack=None):
+        stack = stack or set()
+
+        if coordinate in stack:
+            return formulas_sheet[coordinate].value
+
+        cached_value = values_sheet[coordinate].value
+        formula_value = formulas_sheet[coordinate].value
+
+        if cached_value is not None:
+            return cached_value
+
+        if not isinstance(formula_value, str) or not formula_value.startswith("="):
+            return formula_value
+
+        stack.add(coordinate)
+        expression = formula_value[1:].strip()
+
+        def calculate_sum(match):
+            start_cell = match.group(1)
+            end_cell = match.group(2)
+
+            min_col, min_row, max_col, max_row = range_boundaries(
+                f"{start_cell}:{end_cell}"
+            )
+
+            total = 0
+            for row in range(min_row, max_row + 1):
+                for column in range(min_col, max_col + 1):
+                    cell = formulas_sheet.cell(row=row, column=column)
+                    value = calculate_cell(
+                        values_sheet,
+                        formulas_sheet,
+                        cell.coordinate,
+                        stack,
+                    )
+
+                    if isinstance(value, (int, float)):
+                        total += value
+
+            return str(total)
+
+        expression = re.sub(
+            r"SUM\(\s*\$?([A-Z]+)\$?(\d+):\$?([A-Z]+)\$?(\d+)\s*\)",
+            lambda match: calculate_sum(
+                re.match(
+                    r"([A-Z]+\d+):([A-Z]+\d+)",
+                    f"{match.group(1)}{match.group(2)}:{match.group(3)}{match.group(4)}",
+                )
+            ),
+            expression,
+            flags=re.IGNORECASE,
+        )
+
+        def replace_cell_reference(match):
+            column = match.group(1)
+            row = match.group(2)
+            referenced_cell = f"{column}{row}"
+
+            value = calculate_cell(
+                values_sheet,
+                formulas_sheet,
+                referenced_cell,
+                stack,
+            )
+
+            return str(value) if isinstance(value, (int, float)) else "0"
+
+        expression = re.sub(
+            r"\$?([A-Z]{1,3})\$?(\d+)",
+            replace_cell_reference,
+            expression,
+            flags=re.IGNORECASE,
+        )
+
+        stack.remove(coordinate)
+
+        if not re.fullmatch(r"[0-9eE+\-*/().\s]+", expression):
+            return formula_value
+
+        try:
+            return eval(expression, {"__builtins__": {}}, {})
+        except (TypeError, ValueError, SyntaxError, ZeroDivisionError):
+            return formula_value
+
     sections = []
-    for sheet in workbook.worksheets:
-        rows = [
-            ", ".join("" if cell is None else str(cell) for cell in row)
-            for row in sheet.iter_rows(values_only=True)
-        ]
-        sections.append(f"[Sheet: {sheet.title}]\n" + "\n".join(rows))
+
+    try:
+        for values_sheet, formulas_sheet in zip(
+            values_workbook.worksheets,
+            formulas_workbook.worksheets,
+        ):
+            rows = []
+
+            for value_row, formula_row in zip(
+                values_sheet.iter_rows(),
+                formulas_sheet.iter_rows(),
+            ):
+                cells = []
+
+                for value_cell, formula_cell in zip(value_row, formula_row):
+                    value = calculate_cell(
+                        values_sheet,
+                        formulas_sheet,
+                        formula_cell.coordinate,
+                    )
+
+                    cells.append("" if value is None else str(value))
+
+                if any(cell != "" for cell in cells):
+                    rows.append(", ".join(cells))
+
+            sections.append(
+                f"[Sheet: {values_sheet.title}]\n" + "\n".join(rows)
+            )
+
+    finally:
+        values_workbook.close()
+        formulas_workbook.close()
+
     return "\n\n".join(sections)
