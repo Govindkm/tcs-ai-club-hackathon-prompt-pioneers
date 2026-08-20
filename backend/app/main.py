@@ -7,6 +7,8 @@ so any future client (React, a government portal, etc.) can reuse it unchanged.
 """
 from __future__ import annotations
 
+import logging
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -15,6 +17,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from backend.app.api import applications, auth, health, notifications, reviews, schemes
 from src.db.schema import init_db
 from src.telemetry import setup_telemetry
+
+logging.basicConfig(
+    level=os.getenv("LOG_LEVEL", "INFO").upper(),
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
 
 
 @asynccontextmanager

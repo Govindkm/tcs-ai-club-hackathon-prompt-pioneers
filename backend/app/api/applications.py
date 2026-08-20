@@ -65,12 +65,16 @@ def run_agentic_analysis_job(
     submission_id: int, files: list[tuple[str, bytes]], pasted_text: str, admin_feedback: str = ""
 ) -> None:
     """Background job: ingest documents, then run the agentic pipeline, streaming events into the DB."""
+    logger.info("Analysis job started for submission %s.", submission_id)
     db.set_analysis_status(submission_id, "running", stage="ingestion")
 
     def sink(stage: str, event_type: str, content: str) -> None:
         db.append_analysis_event(submission_id, stage, event_type, content)
         if event_type == "stage_start":
             db.set_analysis_status(submission_id, "running", stage=stage)
+            logger.info("Submission %s: stage '%s' started.", submission_id, stage)
+        elif event_type == "stage_complete":
+            logger.info("Submission %s: stage '%s' complete.", submission_id, stage)
 
     try:
         document_text = _ingest_documents(files, pasted_text, sink)
@@ -88,6 +92,7 @@ def run_agentic_analysis_job(
             score=result["scoring"].score,
             score_explanation=result["scoring"].explanation,
         )
+        logger.info("Analysis job completed for submission %s (score=%s).", submission_id, result["scoring"].score)
     except Exception as exc:
         # Untrusted file extraction and external model calls fail in many expected
         # ways (bad uploads, network/tunnel timeouts, auth) - don't lose the submission.

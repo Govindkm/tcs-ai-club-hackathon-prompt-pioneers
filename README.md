@@ -169,6 +169,22 @@ dense document scans; `moondream` is a faster/lighter alternative, `llama3.2-vis
 heavier general-purpose one). Pull whichever model you configure, e.g. `ollama pull minicpm-v`
 (the [Colab notebook](notebooks/colab_ollama_server.ipynb) has a cell for this).
 
+## Running on Google Colab
+
+Two notebooks under [notebooks/](notebooks) let you use Google Colab instead of a local machine:
+
+- [colab_ollama_server.ipynb](notebooks/colab_ollama_server.ipynb) — hosts **only** an Ollama
+  model server on Colab (with a public tunnel), for use with the rest of the stack running
+  locally. Useful if you just want free/GPU-backed model inference.
+- [colab_full_stack.ipynb](notebooks/colab_full_stack.ipynb) — runs the **entire platform**
+  (Ollama + FastAPI backend + Streamlit portal) inside a single Colab VM, with only the
+  Streamlit UI exposed publicly (the backend and Ollama stay internal to that VM). Use this
+  if you don't want to run anything locally at all.
+
+Both rely on a public tunnel (Cloudflare quick tunnel) with no additional authentication
+beyond the app's own login — treat sessions as short-lived demos with synthetic data only,
+consistent with the Data Sovereignty constraints above.
+
 ## Agents, Tools & Skills (Strands Agents SDK)
 
 AI agents are built with the [Strands Agents SDK](https://strandsagents.com/). Two distinct
