@@ -1,0 +1,28 @@
+# Maps each agent to its system prompt, the Strands tools it is granted directly,
+# and the Agent Skills (SKILL.md packages under ./skills/) it can activate on demand.
+# Keeping this declarative makes it easy to audit which agent can do what.
+
+extraction_agent:
+  description: Extracts structured fields and summaries from submitted documents.
+  tools: [document_tools]
+  skills: [document-extraction]
+
+validation_agent:
+  description: Checks completeness and authenticity indicators on extracted data.
+  tools: [validation_tools]
+  skills: [completeness-validation]
+
+scoring_agent:
+  description: Applies configurable rules and explainable ML scoring to applications.
+  tools: [scoring_tools]
+  skills: [explainable-scoring]
+
+workflow_agent:
+  description: Routes cases to reviewers and manages audit trail; never finalizes decisions.
+  tools: [workflow_tools]
+  skills: [reviewer-workflow]
+
+orchestrator_agent:
+  description: Coordinates the extraction -> validation -> scoring -> workflow pipeline.
+  tools: []
+  skills: []

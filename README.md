@@ -71,28 +71,113 @@ The POC must demonstrate every normalized capability from the eight relevant pro
 
 ---
 
-## Repository Structure (planned)
+## Repository Structure
 
 ```
 .
 ├── docs/                  # Architecture, ADRs, data-flow & threat-boundary diagrams
-├── data/                  # Synthetic dataset generation & samples (non-sensitive only)
+├── data/                  # Synthetic dataset generation & samples (non-sensitive only); app.db (gitignored)
+├── config/
+│   ├── models.yaml        # Model provider config (Bedrock/Anthropic/OpenAI/Ollama)
+│   └── agents.yaml        # Declarative agent -> tools/skills mapping
+├── skills/                # Agent Skills (SKILL.md packages, per agentskills.io spec)
+│   ├── document-extraction/        # Extraction & summarization instructions
+│   ├── completeness-validation/    # Completeness & authenticity-risk instructions
+│   ├── explainable-scoring/        # Rule scoring instructions + references/
+│   └── reviewer-workflow/          # Reviewer routing & audit-trail instructions
+├── app/                    # Streamlit portal (views + session-state helpers)
+│   ├── state.py                    # Current-user session-state helpers
+│   └── views/                      # auth, applicant, admin, notifications views
+├── streamlit_app.py        # Streamlit entrypoint (streamlit run streamlit_app.py)
 ├── src/
+│   ├── agents/            # Strands Agent definitions (one per pipeline stage) + orchestrator
+│   │   └── base.py                # Wires each agent's tools + AgentSkills plugin from config
+│   ├── tools/              # Strands @tool callables granted to agents, grouped by domain
+│   │   ├── document_tools.py      # Extraction & summarization tools
+│   │   ├── validation_tools.py    # Completeness & authenticity-risk tools
+│   │   ├── scoring_tools.py       # Configurable rules + explainable scoring tools
+│   │   └── workflow_tools.py      # Reviewer routing, decision recording, audit trail
+│   ├── db/                 # SQLite schema + repository (users, schemes, submissions, reviews, notifications)
 │   ├── ingestion/         # Submission intake & heterogeneous document handling
-│   ├── extraction/        # Content extraction & summarization
-│   ├── validation/        # Completeness & authenticity checks
-│   ├── scoring/           # Configurable rules + explainable ML scoring
-│   ├── workflow/          # Reviewer routing, decisions, overrides, audit trail
 │   ├── analytics/         # Operational analytics & reporting
 │   └── adapters/          # Mock adapters (schemes portal, messaging, identity)
+├── scripts/
+│   ├── seed_db.py             # Creates a default admin user + sample schemes
+│   └── run_pipeline_demo.py  # End-to-end demo of the agent pipeline
 ├── notebooks/             # Model/evaluation notebooks
 ├── tests/                 # Automated tests for critical paths
+├── .env.example           # Model provider credentials/config template
+├── pyproject.toml
+├── requirements.txt
 └── README.md
 ```
 
+## Agents, Tools & Skills (Strands Agents SDK)
+
+AI agents are built with the [Strands Agents SDK](https://strandsagents.com/). Two distinct
+SDK concepts are used together, per the [Skills plugin docs](https://strandsagents.com/docs/user-guide/concepts/plugins/skills/):
+
+- **Tools** (`src/tools/`) – plain Python `@tool` callables passed directly via
+  `Agent(tools=[...])`. These do the actual work (extract fields, score, route, etc.).
+- **Skills** (`skills/`) – [Agent Skills](https://agentskills.io/specification) packages
+  (`SKILL.md` + optional `scripts/`, `references/`, `assets/`). Only lightweight
+  name/description metadata is injected into the system prompt up front; the agent
+  loads full instructions on demand via the `AgentSkills` plugin's `skills` tool,
+  keeping the context window lean.
+
+| Agent | Tools granted | Skill activated |
+|---|---|---|
+| Extraction agent | `document_tools` | `document-extraction` |
+| Validation agent | `validation_tools` | `completeness-validation` |
+| Scoring agent | `scoring_tools` | `explainable-scoring` |
+| Workflow agent | `workflow_tools` | `reviewer-workflow` |
+
+The **orchestrator** (`src/agents/orchestrator.py`) runs the four agents as a pipeline.
+Agent-to-tool/skill assignments are declared in [config/agents.yaml](config/agents.yaml) and
+wired in [src/agents/base.py](src/agents/base.py) so capabilities stay auditable — no tool
+can finalize an approval/rejection; human review is always required per the platform's
+core constraint.
+
+## Portal (Streamlit + SQLite)
+
+A [Streamlit](https://streamlit.io/) portal ([streamlit_app.py](streamlit_app.py)) backed by a
+local SQLite database ([src/db/](src/db)) provides registration/login and role-based access:
+
+- **Applicants** (self-registered) can browse open schemes, submit applications, and track
+  only their own submissions' status — including the final decision once a case is closed.
+- **Admins** (provisioned via [scripts/seed_db.py](scripts/seed_db.py), not self-registration)
+  can view/filter all submissions, record the human review decision (approve / reject /
+  request more info) with a mandatory rationale, manage schemes, and publish notifications
+  shown to all users.
+
+On submission, the deterministic `document_tools` / `validation_tools` / `scoring_tools`
+functions run automatically (no LLM credentials needed) to pre-fill extraction, validation,
+and an explainable advisory score for the reviewer — the reviewer's decision is always what
+actually changes a case's status.
+
 ## Getting Started
 
-_Setup instructions will be added as the project is scaffolded._
+```powershell
+# 1. Install dependencies
+pip install -r requirements.txt
+
+# 2. Configure model provider credentials (only needed for the agent/LLM demo, not the portal)
+Copy-Item .env.example .env
+# edit .env: set STRANDS_MODEL_PROVIDER and the matching credentials
+# (use Ollama/Bedrock with local/on-prem access for restricted data)
+
+# 3. Run unit tests (no live model calls)
+pytest
+
+# 4. Seed the local SQLite DB with a default admin user + sample schemes
+python scripts/seed_db.py
+
+# 5. Launch the Streamlit portal
+streamlit run streamlit_app.py
+
+# 6. (Optional) Run the end-to-end LLM agent pipeline demo (requires model credentials)
+python scripts/run_pipeline_demo.py
+```
 
 ## Status
 

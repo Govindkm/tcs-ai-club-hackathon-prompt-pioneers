@@ -1,0 +1,15 @@
+# Central model-provider configuration for all agents.
+# Keeps model selection separate from agent/skill logic (config separation requirement).
+providers:
+  bedrock:
+    model_id: ${BEDROCK_MODEL_ID}
+    region: ${AWS_REGION}
+  anthropic:
+    model_id: ${ANTHROPIC_MODEL_ID}
+  openai:
+    model_id: ${OPENAI_MODEL_ID}
+  ollama:
+    model_id: ${OLLAMA_MODEL_ID}
+    host: ${OLLAMA_HOST}
+
+default_provider: ${STRANDS_MODEL_PROVIDER:-bedrock}
