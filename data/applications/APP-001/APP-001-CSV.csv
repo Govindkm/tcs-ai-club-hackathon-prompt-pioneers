@@ -13,6 +13,8 @@
 2011,A,"Agriculture, Forestry and Fishing",b_1-5,Salaries and wages paid,1435,DOLLARS(millions),,,,,,,,,
 2011,A,"Agriculture, Forestry and Fishing",b_1-5,"Sales, government funding, grants and subsidies",13359,DOLLARS(millions),,,,,,,,,
 2011,A,"Agriculture, Forestry and Fishing",b_1-5,Total income,13771,DOLLARS(millions),,,,,,,,,
+<<<<<<< HEAD
+=======
 2011,A,"Agriculture, Forestry and Fishing",b_1-5,Total expenditure,12316,DOLLARS(millions),,,,,,,,,
 2011,A,"Agriculture, Forestry and Fishing",b_1-5,Operating profit before tax,1247,DOLLARS(millions),,,,,,,,,
 2011,A,"Agriculture, Forestry and Fishing",b_1-5,Total assets,52666,DOLLARS(millions),,,,,,,,,
@@ -23219,3 +23221,4 @@
 2025,all,All Industries,j_Grand_Total,Total assets,3068548,DOLLARS(millions),,,,,,,,,
 2025,all,All Industries,j_Grand_Total,Total expenditure,867750,DOLLARS(millions),,,,,,,,,
 2025,all,All Industries,j_Grand_Total,Total income,976077,DOLLARS(millions),,,,,,,,,
+>>>>>>> 4556e9df4458c66758f18a03e320fc0b8bd87398
