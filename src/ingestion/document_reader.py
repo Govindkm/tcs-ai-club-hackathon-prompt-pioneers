@@ -114,10 +114,60 @@ def _extract_docx_text(file_bytes: bytes) -> str:
     import docx
 
     document = docx.Document(io.BytesIO(file_bytes))
-    sections = [p.text for p in document.paragraphs]
-    for rel in document.part.rels.values():
-        if "image" in rel.reltype:
-            sections.append(describe_image(rel.target_part.blob))
+    sections = []
+
+    # Extract normal paragraphs.
+    for paragraph in document.paragraphs:
+        text = paragraph.text.strip()
+        if text:
+            sections.append(text)
+
+    # Extract table rows and nested tables.
+    def extract_table(table):
+        table_text = []
+
+        for row in table.rows:
+            values = []
+
+            for cell in row.cells:
+                cell_text = cell.text.strip().replace("\n", " ")
+                if cell_text:
+                    values.append(cell_text)
+
+                for nested_table in cell.tables:
+                    nested_text = extract_table(nested_table)
+                    if nested_text:
+                        values.append(nested_text)
+
+            if values:
+                table_text.append(" | ".join(values))
+
+        return "\n".join(table_text)
+
+    for table in document.tables:
+        table_text = extract_table(table)
+        if table_text:
+            sections.append(table_text)
+
+    # Extract OCR text from embedded images.
+    processed_images = set()
+
+    for relationship in document.part.rels.values():
+        if "image" not in relationship.reltype:
+            continue
+
+        image_bytes = relationship.target_part.blob
+        image_id = hash(image_bytes)
+
+        if image_id in processed_images:
+            continue
+
+        processed_images.add(image_id)
+        image_text = describe_image(image_bytes).strip()
+
+        if image_text:
+            sections.append(image_text)
+
     return "\n".join(sections)
 
 
