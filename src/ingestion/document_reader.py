@@ -177,14 +177,78 @@ def _extract_pptx_text(file_bytes: bytes) -> str:
 
     presentation = Presentation(io.BytesIO(file_bytes))
     sections = []
+
     for slide_number, slide in enumerate(presentation.slides, start=1):
         slide_sections = [f"[Slide {slide_number}]"]
+
         for shape in slide.shapes:
             if shape.has_text_frame and shape.text_frame.text.strip():
-                slide_sections.append(shape.text_frame.text)
+                slide_sections.append(shape.text_frame.text.strip())
+
+            elif shape.shape_type == MSO_SHAPE_TYPE.CHART:
+                chart = shape.chart
+                chart_sections = ["[Chart]"]
+
+                if chart.has_title:
+                    title = chart.chart_title.text_frame.text.strip()
+                    if title:
+                        chart_sections[0] = f"[Chart: {title}]"
+
+                for plot in chart.plots:
+                    try:
+                        categories = list(plot.categories)
+                    except (AttributeError, ValueError):
+                        categories = []
+
+                    category_values = []
+                    for category in categories:
+                        try:
+                            value = category.label
+                        except (AttributeError, ValueError):
+                            value = None
+
+                        if value is None:
+                            try:
+                                value = category.value
+                            except (AttributeError, ValueError):
+                                value = None
+
+                        category_values.append("" if value is None else str(value))
+
+                    for series in plot.series:
+                        try:
+                            series_name = series.name
+                        except (AttributeError, ValueError):
+                            series_name = "Unnamed series"
+
+                        try:
+                            values = list(series.values)
+                        except (AttributeError, ValueError):
+                            values = []
+
+                        chart_sections.append(f"Series: {series_name}")
+
+                        if category_values:
+                            chart_sections.append(
+                                "Categories: " + ", ".join(category_values)
+                            )
+
+                        chart_sections.append(
+                            "Values: " + ", ".join(
+                                "" if value is None else str(value)
+                                for value in values
+                            )
+                        )
+
+                slide_sections.append("\n".join(chart_sections))
+
             elif shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
-                slide_sections.append(describe_image(shape.image.blob))
+                image_text = describe_image(shape.image.blob).strip()
+                if image_text:
+                    slide_sections.append(image_text)
+
         sections.append("\n".join(slide_sections))
+
     return "\n\n".join(sections)
 
 
