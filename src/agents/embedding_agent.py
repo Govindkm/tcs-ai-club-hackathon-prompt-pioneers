@@ -12,7 +12,7 @@ def create_embedding_agent(callback_handler: Callable[..., Any] | None = None):
         callback_handler=callback_handler,
         system_prompt=(
             "Index the complete structured document bundle in the local vector database. "
-            "Call index_document_bundle exactly once. Pass every document unchanged; "
-            "never summarize, rewrite, filter, or omit content. Return the tool result."
+            "The orchestrator invokes the indexing tool exactly once. Pass every document "
+            "unchanged; never summarize, rewrite, filter, or omit content."
         ),
     )

@@ -22,6 +22,7 @@ from src.agents.results import EmbeddingIndexResult, ExtractionResult, ScoringRe
 from src.agents.scoring_agent import create_scoring_agent
 from src.agents.validation_agent import create_validation_agent
 from src.agents.workflow_agent import create_workflow_agent
+from src.tools.embedding_tools import index_document_bundle
 
 EventSink = Callable[[str, str, str], None]
 
@@ -73,12 +74,15 @@ class ApplicationPipeline:
             if scheme_id is None or submission_id is None:
                 raise ValueError("scheme_id and submission_id are required when indexing documents.")
             self._event_sink("embedding", "stage_start", "Indexing extracted documents in ChromaDB.")
-            embedding = self.embedding_agent.structured_output(
-                EmbeddingIndexResult,
-                "Index this complete document bundle using the index_document_bundle tool exactly once. "
-                "Do not modify, summarize, filter, or omit any document. "
-                f"scheme_id={scheme_id}, scheme_title={scheme_title!r}, submission_id={submission_id}, "
-                f"document_bundle={json.dumps(document_bundle, ensure_ascii=False)}",
+            # Storage is the required side effect of this stage. Call the registered
+            # tool directly so a typed LLM response cannot falsely imply indexing.
+            embedding = EmbeddingIndexResult(
+                **index_document_bundle(
+                    document_bundle=json.dumps(document_bundle, ensure_ascii=False),
+                    scheme_id=scheme_id,
+                    scheme_title=scheme_title,
+                    submission_id=submission_id,
+                )
             )
             self._event_sink("embedding", "stage_complete", embedding.model_dump_json())
 
