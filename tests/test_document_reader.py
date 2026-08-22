@@ -19,6 +19,7 @@ from src.ingestion.document_reader import (
     MAX_ZIP_TOTAL_UNCOMPRESSED_BYTES,
     extract_text,
 )
+from src.ingestion.document_reader import combine_document_text, extract_documents
 
 
 @pytest.fixture(autouse=True)
@@ -154,3 +155,25 @@ def test_extract_text_rejects_unsupported_extension():
 def test_extract_text_rejects_oversized_file():
     with pytest.raises(ValueError):
         extract_text("big.txt", b"0" * (document_reader.MAX_FILE_SIZE_BYTES + 1))
+
+
+def test_extract_documents_preserves_file_boundaries_and_metadata():
+    documents = extract_documents([("proposal.TXT", b"Proposal content"), ("budget.csv", b"amount,100")])
+
+    assert [document["title"] for document in documents] == ["proposal.TXT", "budget.csv"]
+    assert [document["extension"] for document in documents] == [".txt", ".csv"]
+    assert documents[0]["content"] == "Proposal content"
+    assert '"size_bytes": 16' in documents[0]["metadata"]
+    assert "--- proposal.TXT ---" in combine_document_text(documents)
+
+
+def test_extract_documents_preserves_zip_entry_paths():
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("forms/notes.txt", "Nested content")
+
+    documents = extract_documents([("submission.zip", buffer.getvalue())])
+
+    assert len(documents) == 1
+    assert documents[0]["source_path"] == "submission.zip/forms/notes.txt"
+    assert documents[0]["content"] == "Nested content"

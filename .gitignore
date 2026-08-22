@@ -13,4 +13,5 @@ htmlcov/
 data/restricted/
 data/app.db
 *.db
+data/chroma/
 .vscode/

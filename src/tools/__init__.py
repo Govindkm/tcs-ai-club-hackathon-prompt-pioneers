@@ -6,10 +6,11 @@ what SKILL.md files reference in their `allowed-tools` frontmatter.
 """
 from __future__ import annotations
 
-from src.tools import document_tools, scoring_tools, validation_tools, workflow_tools
+from src.tools import document_tools, embedding_tools, scoring_tools, validation_tools, workflow_tools
 
 TOOL_MODULES = {
     "document_tools": document_tools.TOOLS,
+    "embedding_tools": embedding_tools.TOOLS,
     "validation_tools": validation_tools.TOOLS,
     "scoring_tools": scoring_tools.TOOLS,
     "workflow_tools": workflow_tools.TOOLS,

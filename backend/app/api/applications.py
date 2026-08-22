@@ -24,7 +24,7 @@ from backend.app.schemas import AnalysisEventOut, AnalysisStatusOut, AnalyzeRequ
 from backend.app.security import get_current_user, require_role
 from src.agents.orchestrator import create_orchestrator
 from src.db import repository as db
-from src.ingestion.document_reader import extract_text
+from src.ingestion.document_reader import combine_document_text, extract_documents
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/applications", tags=["applications"])
@@ -43,22 +43,37 @@ def _check_ownership(submission: dict, current_user: dict) -> None:
 
 def _ingest_documents(
     files: list[tuple[str, bytes]], pasted_text: str, sink: Callable[[str, str, str], None]
-) -> str:
+) -> tuple[str, list[dict]]:
     """Extract text from uploads - including any slow vision/OCR calls - entirely off the request path."""
     sink("ingestion", "stage_start", f"Extracting text from {len(files)} file(s).")
-    sections = []
+    documents = []
     for filename, content in files:
         try:
-            text = extract_text(filename, content)
-            sections.append(f"--- {filename} ---\n{text}")
+            documents.extend(extract_documents([(filename, content)]))
         except Exception as exc:  # noqa: BLE001 - untrusted uploads + external OCR calls fail in many ways
             sink("ingestion", "error", f"Failed to extract '{filename}': {exc}")
-            sections.append(f"--- {filename} ---\n[extraction failed: {exc}]")
+            documents.append({
+                "title": filename,
+                "extension": f".{filename.rsplit('.', 1)[-1].lower()}" if "." in filename else "",
+                "source_path": filename,
+                "metadata": "{}",
+                "content": f"[extraction failed: {exc}]",
+                "status": "failed",
+                "error": str(exc),
+            })
     if pasted_text.strip():
-        sections.append(pasted_text.strip())
-    document_text = "\n\n".join(sections)
+        documents.append({
+            "title": "pasted-text.txt",
+            "extension": ".txt",
+            "source_path": "pasted-text.txt",
+            "metadata": "{}",
+            "content": pasted_text.strip(),
+            "status": "extracted",
+            "error": None,
+        })
+    document_text = combine_document_text(documents)
     sink("ingestion", "stage_complete", f"Extracted {len(document_text)} characters of text.")
-    return document_text
+    return document_text, documents
 
 
 def run_agentic_analysis_job(
@@ -77,13 +92,21 @@ def run_agentic_analysis_job(
             logger.info("Submission %s: stage '%s' complete.", submission_id, stage)
 
     try:
-        document_text = _ingest_documents(files, pasted_text, sink)
+        document_text, document_bundle = _ingest_documents(files, pasted_text, sink)
         if not document_text.strip():
             raise ValueError("No extractable document content.")
-        db.update_submission_document_text(submission_id, document_text)
+        db.update_submission_documents(submission_id, document_text, document_bundle)
 
         pipeline = create_orchestrator(event_sink=sink)
-        result = pipeline.process(document_text, required_fields=_REQUIRED_FIELDS, admin_feedback=admin_feedback)
+        result = pipeline.process(
+            document_text,
+            required_fields=_REQUIRED_FIELDS,
+            admin_feedback=admin_feedback,
+            document_bundle=document_bundle if files else None,
+            scheme_id=db.get_submission(submission_id)["scheme_id"] if files else None,
+            scheme_title=db.get_scheme(db.get_submission(submission_id)["scheme_id"])["name"] if files else "",
+            submission_id=submission_id if files else None,
+        )
         db.save_analysis_result(
             submission_id,
             extracted_fields=result["extraction"].extracted_fields,

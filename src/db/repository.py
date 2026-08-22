@@ -98,6 +98,15 @@ def list_schemes(active_only: bool = True) -> list[dict]:
     return [_row_to_dict(r) for r in rows]
 
 
+def get_scheme(scheme_id: int) -> dict | None:
+    conn = get_connection()
+    try:
+        row = conn.execute("SELECT * FROM schemes WHERE id = ?", (scheme_id,)).fetchone()
+    finally:
+        conn.close()
+    return _row_to_dict(row) if row else None
+
+
 def set_scheme_active(scheme_id: int, is_active: bool) -> None:
     conn = get_connection()
     try:
@@ -112,7 +121,7 @@ def set_scheme_active(scheme_id: int, is_active: bool) -> None:
 # ---------------------------------------------------------------------------
 
 def _parse_submission_json(sub: dict) -> dict:
-    for field in ("extracted_fields", "validation_result", "score_explanation"):
+    for field in ("extracted_fields", "validation_result", "score_explanation", "document_manifest"):
         if sub.get(field):
             sub[field] = json.loads(sub[field])
     return sub
@@ -132,8 +141,21 @@ def create_submission(user_id: int, scheme_id: int, applicant_notes: str, docume
         conn.close()
 
 
+def update_submission_documents(submission_id: int, document_text: str, document_manifest: list[dict]) -> None:
+    """Persist both legacy combined text and the structured extracted-document manifest."""
+    conn = get_connection()
+    try:
+        conn.execute(
+            "UPDATE submissions SET document_text = ?, document_manifest = ?, updated_at = datetime('now') WHERE id = ?",
+            (document_text, json.dumps(document_manifest), submission_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def update_submission_document_text(submission_id: int, document_text: str) -> None:
-    """Fill in the fully-extracted document text once the (potentially slow) ingestion stage completes."""
+    """Backward-compatible helper for callers that only have combined text."""
     conn = get_connection()
     try:
         conn.execute(

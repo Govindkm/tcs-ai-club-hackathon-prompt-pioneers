@@ -13,10 +13,12 @@ AI's "thinking" for human review - not just the final answer.
 """
 from __future__ import annotations
 
+import json
 from typing import Callable
 
 from src.agents.extraction_agent import create_extraction_agent
-from src.agents.results import ExtractionResult, ScoringResult, ValidationResult
+from src.agents.embedding_agent import create_embedding_agent
+from src.agents.results import EmbeddingIndexResult, ExtractionResult, ScoringResult, ValidationResult
 from src.agents.scoring_agent import create_scoring_agent
 from src.agents.validation_agent import create_validation_agent
 from src.agents.workflow_agent import create_workflow_agent
@@ -33,6 +35,7 @@ class ApplicationPipeline:
 
     def __init__(self, event_sink: EventSink | None = None) -> None:
         self._event_sink = event_sink or _noop_sink
+        self.embedding_agent = create_embedding_agent(self._stage_callback("embedding"))
         self.extraction_agent = create_extraction_agent(self._stage_callback("extraction"))
         self.validation_agent = create_validation_agent(self._stage_callback("validation"))
         self.scoring_agent = create_scoring_agent(self._stage_callback("scoring"))
@@ -54,8 +57,30 @@ class ApplicationPipeline:
 
         return _callback
 
-    def process(self, document_text: str, required_fields: list[str], admin_feedback: str = "") -> dict:
+    def process(
+        self,
+        document_text: str,
+        required_fields: list[str],
+        admin_feedback: str = "",
+        document_bundle: list[dict] | None = None,
+        scheme_id: int | None = None,
+        scheme_title: str = "",
+        submission_id: int | None = None,
+    ) -> dict:
         feedback_note = f"\n\nAdmin feedback to incorporate: {admin_feedback}" if admin_feedback else ""
+
+        if document_bundle is not None:
+            if scheme_id is None or submission_id is None:
+                raise ValueError("scheme_id and submission_id are required when indexing documents.")
+            self._event_sink("embedding", "stage_start", "Indexing extracted documents in ChromaDB.")
+            embedding = self.embedding_agent.structured_output(
+                EmbeddingIndexResult,
+                "Index this complete document bundle using the index_document_bundle tool exactly once. "
+                "Do not modify, summarize, filter, or omit any document. "
+                f"scheme_id={scheme_id}, scheme_title={scheme_title!r}, submission_id={submission_id}, "
+                f"document_bundle={json.dumps(document_bundle, ensure_ascii=False)}",
+            )
+            self._event_sink("embedding", "stage_complete", embedding.model_dump_json())
 
         self._event_sink("extraction", "stage_start", "Extracting fields and summarizing the document.")
         extraction = self.extraction_agent.structured_output(
@@ -80,7 +105,10 @@ class ApplicationPipeline:
         )
         self._event_sink("scoring", "stage_complete", scoring.model_dump_json())
 
-        return {"extraction": extraction, "validation": validation, "scoring": scoring}
+        result = {"extraction": extraction, "validation": validation, "scoring": scoring}
+        if document_bundle is not None:
+            result["embedding"] = embedding
+        return result
 
 
 def create_orchestrator(event_sink: EventSink | None = None) -> ApplicationPipeline:

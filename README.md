@@ -264,6 +264,31 @@ feedback box that lets an admin steer a re-analysis with human-in-the-loop guida
 (`POST /applications/{id}/analyze` with `{"feedback": "..."}`), which gets included in the
 next prompt sent to each agent.
 
+## Local document embeddings
+
+After uploaded files are extracted, the orchestrator runs the `embedding_agent` stage before
+the application extraction stage. The agent uses the `embedding-storage` skill and its
+`embedding_tools` tool to pass the complete structured document bundle to ChromaDB. The tool
+performs validation, chunking, local embedding, deterministic IDs, and persistence; the LLM
+must not rewrite or omit document content.
+
+Install the vector dependencies with the normal setup command:
+
+```powershell
+pip install -r requirements.txt
+```
+
+The default embedding model is the local multilingual
+`sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`. Its model files are downloaded
+and cached on the first embedding request. Set `EMBEDDING_MODEL_NAME` in `.env` to select a
+different compatible model. Chroma data is persisted under `data/chroma` by default; configure
+`CHROMA_PERSIST_DIRECTORY` for another local directory. This directory is ignored by git and
+should remain on local/on-premise storage for restricted document data.
+
+The existing SQLite `document_text` field remains the combined text used by current analysis
+agents and the UI. The `document_manifest` field preserves document boundaries, titles,
+extensions, metadata, and extracted content for re-analysis.
+
 ## Getting Started
 
 ```powershell

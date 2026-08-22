@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS submissions (
     scheme_id INTEGER NOT NULL REFERENCES schemes(id),
     applicant_notes TEXT NOT NULL DEFAULT '',
     document_text TEXT NOT NULL DEFAULT '',
+    document_manifest TEXT NOT NULL DEFAULT '[]',
     status TEXT NOT NULL DEFAULT 'submitted'
         CHECK (status IN ('submitted', 'under_review', 'needs_more_info', 'approved', 'rejected')),
     analysis_status TEXT NOT NULL DEFAULT 'queued'
@@ -79,6 +80,9 @@ def init_db() -> None:
     conn = get_connection()
     try:
         conn.executescript(_SCHEMA)
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(submissions)").fetchall()}
+        if "document_manifest" not in columns:
+            conn.execute("ALTER TABLE submissions ADD COLUMN document_manifest TEXT NOT NULL DEFAULT '[]'")
         conn.commit()
     finally:
         conn.close()

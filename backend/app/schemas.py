@@ -53,6 +53,7 @@ class SubmissionOut(BaseModel):
     applicant_name: str | None = None
     applicant_notes: str
     document_text: str
+    document_manifest: list[dict] = Field(default_factory=list)
     status: str
     analysis_status: str
     analysis_stage: str | None = None

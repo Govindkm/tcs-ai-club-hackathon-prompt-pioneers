@@ -26,3 +26,13 @@ class ValidationResult(BaseModel):
 class ScoringResult(BaseModel):
     score: float = Field(ge=0.0, description="Explainable advisory score for the human reviewer.")
     explanation: dict[str, Any] = Field(description="Breakdown of factors contributing to the score.")
+
+
+class EmbeddingIndexResult(BaseModel):
+    scheme_id: int
+    submission_id: int
+    indexed_document_count: int = Field(ge=0)
+    indexed_chunk_count: int = Field(ge=0)
+    collection_name: str
+    embedding_model: str
+    record_ids: list[str] = Field(default_factory=list)

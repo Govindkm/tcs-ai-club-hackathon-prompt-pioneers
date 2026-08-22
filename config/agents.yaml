@@ -7,6 +7,11 @@ extraction_agent:
   tools: [document_tools]
   skills: [document-extraction]
 
+embedding_agent:
+  description: Indexes the complete extracted document bundle in the local Chroma vector database.
+  tools: [embedding_tools]
+  skills: [embedding-storage]
+
 validation_agent:
   description: Checks completeness and authenticity indicators on extracted data.
   tools: [validation_tools]

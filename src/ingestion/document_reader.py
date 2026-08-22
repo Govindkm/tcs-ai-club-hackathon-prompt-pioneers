@@ -13,6 +13,7 @@ touching Streamlit views or the submissions schema.
 from __future__ import annotations
 
 import io
+import json
 import zipfile
 
 from src.ingestion.vision import describe_image
@@ -62,11 +63,64 @@ def extract_text(filename: str, file_bytes: bytes, _zip_depth: int = 0) -> str:
 
 def extract_text_from_uploads(uploaded_files) -> str:
     """Extract and concatenate text from a list of Streamlit UploadedFile objects."""
-    sections = []
-    for uploaded_file in uploaded_files or []:
-        text = extract_text(uploaded_file.name, uploaded_file.getvalue())
-        sections.append(f"--- {uploaded_file.name} ---\n{text}")
+    return combine_document_text(extract_documents_from_uploads(uploaded_files))
+
+
+def extract_documents(files: list[tuple[str, bytes]]) -> list[dict]:
+    """Extract uploads into document records while preserving file boundaries."""
+    documents = []
+    for filename, content in files:
+        documents.extend(_extract_document_records(filename, content))
+    return documents
+
+
+def extract_documents_from_uploads(uploaded_files) -> list[dict]:
+    """Extract Streamlit uploads into structured records suitable for persistence."""
+    return extract_documents(
+        [(uploaded_file.name, uploaded_file.getvalue()) for uploaded_file in uploaded_files or []]
+    )
+
+
+def combine_document_text(documents: list[dict]) -> str:
+    """Build the legacy combined text input from structured document records."""
+    sections = [f"--- {document['source_path']} ---\n{document['content']}" for document in documents]
     return "\n\n".join(sections)
+
+
+def _extract_document_records(filename: str, file_bytes: bytes, source_path: str | None = None, _zip_depth: int = 0) -> list[dict]:
+    path = source_path or filename
+    suffix = filename.lower().rsplit(".", 1)[-1] if "." in filename else ""
+    if suffix == "zip":
+        with zipfile.ZipFile(io.BytesIO(file_bytes)) as archive:
+            entries = [i for i in archive.infolist() if not i.is_dir() and "__MACOSX" not in i.filename]
+            if len(entries) > MAX_ZIP_ENTRIES:
+                raise ValueError(f"'{filename}' contains too many files (max {MAX_ZIP_ENTRIES}).")
+            if sum(entry.file_size for entry in entries) > MAX_ZIP_TOTAL_UNCOMPRESSED_BYTES:
+                raise ValueError(f"'{filename}' would extract to more than {MAX_ZIP_TOTAL_UNCOMPRESSED_BYTES // (1024 * 1024)}MB; rejected.")
+            records = []
+            for entry in entries:
+                entry_path = f"{path}/{entry.filename}"
+                try:
+                    records.extend(_extract_document_records(entry.filename, archive.read(entry), entry_path, _zip_depth + 1))
+                except ValueError as exc:
+                    records.append(_document_record(entry.filename, entry_path, "", file_bytes=0, error=str(exc)))
+            return records
+
+    text = extract_text(filename, file_bytes, _zip_depth)
+    return [_document_record(filename, path, text, file_bytes=len(file_bytes))]
+
+
+def _document_record(filename: str, source_path: str, content: str, file_bytes: int, error: str | None = None) -> dict:
+    extension = f".{filename.rsplit('.', 1)[-1].lower()}" if "." in filename else ""
+    return {
+        "title": filename,
+        "extension": extension,
+        "source_path": source_path,
+        "metadata": json.dumps({"size_bytes": file_bytes}, sort_keys=True),
+        "content": content,
+        "status": "failed" if error else "extracted",
+        "error": error,
+    }
 
 
 def _extract_zip_text(filename: str, file_bytes: bytes, zip_depth: int) -> str:

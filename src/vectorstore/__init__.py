@@ -1,0 +1,1 @@
+"""Persistent vector storage for extracted application documents."""
