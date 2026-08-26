@@ -14,7 +14,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.app.api import applications, auth, health, notifications, reviews, schemes
+from backend.app.api import applications, auth, health, notifications, reviews, schemes, users
 from src.db.schema import init_db
 from src.telemetry import setup_telemetry
 
@@ -46,3 +46,4 @@ app.include_router(schemes.router)
 app.include_router(applications.router)
 app.include_router(reviews.router)
 app.include_router(notifications.router)
+app.include_router(users.router)

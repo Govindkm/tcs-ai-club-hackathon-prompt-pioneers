@@ -8,6 +8,8 @@ class RegisterRequest(BaseModel):
     username: str = Field(min_length=3, max_length=64)
     password: str = Field(min_length=8)
     full_name: str = Field(min_length=1)
+    email: str = Field(min_length=3, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+    organisation_name: str = Field(min_length=1)
 
 
 class LoginRequest(BaseModel):
@@ -20,6 +22,21 @@ class UserOut(BaseModel):
     username: str
     full_name: str
     role: str
+    email: str | None = None
+    organisation_name: str | None = None
+    is_active: bool = True
+    created_at: str | None = None
+
+
+class CreateAdminRequest(BaseModel):
+    username: str = Field(min_length=3, max_length=64)
+    password: str = Field(min_length=8)
+    full_name: str = Field(min_length=1)
+    email: str | None = Field(default=None, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+class ResetPasswordRequest(BaseModel):
+    new_password: str = Field(min_length=8)
 
 
 class TokenResponse(BaseModel):
@@ -51,6 +68,7 @@ class SubmissionOut(BaseModel):
     scheme_id: int
     scheme_name: str | None = None
     applicant_name: str | None = None
+    applicant_organisation: str | None = None
     applicant_notes: str
     document_text: str
     document_manifest: list[dict] = Field(default_factory=list)
@@ -58,6 +76,13 @@ class SubmissionOut(BaseModel):
     analysis_status: str
     analysis_stage: str | None = None
     analysis_error: str | None = None
+    timeline_stage: str = "ingesting"
+    assigned_admin_id: int | None = None
+    assigned_admin_name: str | None = None
+    plagiarism_result: dict | None = None
+    validation_feedback: str | None = None
+    reevaluation_request: str | None = None
+    reevaluation_requested_at: str | None = None
     extracted_fields: dict | None = None
     summary: str | None = None
     validation_result: dict | None = None
@@ -65,6 +90,22 @@ class SubmissionOut(BaseModel):
     score_explanation: dict | None = None
     created_at: str
     updated_at: str
+
+
+class ValidationFeedbackRequest(BaseModel):
+    feedback: str = Field(min_length=1, description="Instructions for the validation agent to re-check.")
+
+
+class ReevaluationRequestIn(BaseModel):
+    details: str = Field(min_length=1, description="What the applicant wants re-checked/changed.")
+
+
+class ScoreApprovalOut(BaseModel):
+    id: int
+    submission_id: int
+    admin_id: int
+    admin_name: str
+    created_at: str
 
 
 class ReviewIn(BaseModel):

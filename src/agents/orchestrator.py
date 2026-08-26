@@ -22,7 +22,7 @@ from src.agents.results import EmbeddingIndexResult, ExtractionResult, ScoringRe
 from src.agents.scoring_agent import create_scoring_agent
 from src.agents.validation_agent import create_validation_agent
 from src.agents.workflow_agent import create_workflow_agent
-from src.tools.embedding_tools import index_document_bundle
+from src.tools.embedding_tools import check_document_similarity, index_document_bundle
 
 EventSink = Callable[[str, str, str], None]
 
@@ -58,6 +58,80 @@ class ApplicationPipeline:
 
         return _callback
 
+    def index_and_check(
+        self,
+        document_bundle: list[dict],
+        scheme_id: int,
+        scheme_title: str,
+        submission_id: int,
+    ) -> dict:
+        """Ingestion-time stage: index the document bundle in ChromaDB (updating only
+        documents that changed) and check it for plagiarized/duplicated content against
+        everything else already indexed. Deterministic tool calls, no LLM reasoning
+        needed - keeps this fast and reliable on the submission request path.
+        """
+        self._event_sink("embedding", "stage_start", "Indexing extracted documents in ChromaDB.")
+        embedding = EmbeddingIndexResult(
+            **index_document_bundle(
+                document_bundle=json.dumps(document_bundle, ensure_ascii=False),
+                scheme_id=scheme_id,
+                scheme_title=scheme_title,
+                submission_id=submission_id,
+            )
+        )
+        self._event_sink("embedding", "stage_complete", embedding.model_dump_json())
+
+        self._event_sink("plagiarism_check", "stage_start", "Checking for similar/duplicated content already indexed.")
+        plagiarism = check_document_similarity(
+            document_bundle=json.dumps(document_bundle, ensure_ascii=False),
+            submission_id=submission_id,
+        )
+        self._event_sink("plagiarism_check", "stage_complete", json.dumps(plagiarism))
+        return {"embedding": embedding, "plagiarism": plagiarism}
+
+    def run_extraction(self, document_text: str, admin_feedback: str = "") -> ExtractionResult:
+        feedback_note = f"\n\nAdmin feedback to incorporate: {admin_feedback}" if admin_feedback else ""
+        self._event_sink("extraction", "stage_start", "Extracting fields and summarizing the document.")
+        extraction = self.extraction_agent.structured_output(
+            ExtractionResult,
+            f"Extract fields and summarize this application document:\n\n{document_text}{feedback_note}",
+        )
+        self._event_sink("extraction", "stage_complete", extraction.model_dump_json())
+        return extraction
+
+    def run_validation(
+        self,
+        extracted_fields: dict,
+        required_fields: list[str],
+        admin_feedback: str = "",
+        plagiarism_summary: dict | None = None,
+        organisation_name: str | None = None,
+    ) -> ValidationResult:
+        feedback_note = f"\n\nAdmin feedback to incorporate: {admin_feedback}" if admin_feedback else ""
+        plagiarism_note = (
+            f"\n\nPlagiarism/duplicate-content check result: {plagiarism_summary}" if plagiarism_summary else ""
+        )
+        org_note = f"\n\nApplicant organisation name: {organisation_name}" if organisation_name else ""
+        self._event_sink("validation", "stage_start", "Checking completeness and authenticity risk.")
+        validation = self.validation_agent.structured_output(
+            ValidationResult,
+            "Validate completeness of these extracted fields against the required "
+            f"fields {required_fields}, and flag any authenticity risks. "
+            f"Extracted fields: {extracted_fields}{plagiarism_note}{org_note}{feedback_note}",
+        )
+        self._event_sink("validation", "stage_complete", validation.model_dump_json())
+        return validation
+
+    def run_scoring(self, validation_result: dict, admin_feedback: str = "") -> ScoringResult:
+        feedback_note = f"\n\nAdmin feedback to incorporate: {admin_feedback}" if admin_feedback else ""
+        self._event_sink("scoring", "stage_start", "Computing an explainable advisory score.")
+        scoring = self.scoring_agent.structured_output(
+            ScoringResult,
+            f"Compute an explainable score from this validation result: {validation_result}{feedback_note}",
+        )
+        self._event_sink("scoring", "stage_complete", scoring.model_dump_json())
+        return scoring
+
     def process(
         self,
         document_text: str,
@@ -68,50 +142,27 @@ class ApplicationPipeline:
         scheme_title: str = "",
         submission_id: int | None = None,
     ) -> dict:
-        feedback_note = f"\n\nAdmin feedback to incorporate: {admin_feedback}" if admin_feedback else ""
-
+        """Convenience wrapper that runs the full pipeline end-to-end (used by the
+        offline demo script). The live backend instead calls the granular
+        index_and_check/run_extraction/run_validation/run_scoring stages so an admin
+        can gate each step of the human-in-the-loop workflow.
+        """
+        result: dict = {}
+        plagiarism_summary = None
         if document_bundle is not None:
             if scheme_id is None or submission_id is None:
                 raise ValueError("scheme_id and submission_id are required when indexing documents.")
-            self._event_sink("embedding", "stage_start", "Indexing extracted documents in ChromaDB.")
-            # Storage is the required side effect of this stage. Call the registered
-            # tool directly so a typed LLM response cannot falsely imply indexing.
-            embedding = EmbeddingIndexResult(
-                **index_document_bundle(
-                    document_bundle=json.dumps(document_bundle, ensure_ascii=False),
-                    scheme_id=scheme_id,
-                    scheme_title=scheme_title,
-                    submission_id=submission_id,
-                )
-            )
-            self._event_sink("embedding", "stage_complete", embedding.model_dump_json())
+            indexed = self.index_and_check(document_bundle, scheme_id, scheme_title, submission_id)
+            result["embedding"] = indexed["embedding"]
+            plagiarism_summary = indexed["plagiarism"]
 
-        self._event_sink("extraction", "stage_start", "Extracting fields and summarizing the document.")
-        extraction = self.extraction_agent.structured_output(
-            ExtractionResult,
-            f"Extract fields and summarize this application document:\n\n{document_text}{feedback_note}",
+        extraction = self.run_extraction(document_text, admin_feedback)
+        validation = self.run_validation(
+            extraction.extracted_fields, required_fields, admin_feedback, plagiarism_summary
         )
-        self._event_sink("extraction", "stage_complete", extraction.model_dump_json())
+        scoring = self.run_scoring(validation.model_dump(), admin_feedback)
 
-        self._event_sink("validation", "stage_start", "Checking completeness and authenticity risk.")
-        validation = self.validation_agent.structured_output(
-            ValidationResult,
-            "Validate completeness of these extracted fields against the required "
-            f"fields {required_fields}, and flag any authenticity risks. "
-            f"Extracted fields: {extraction.extracted_fields}{feedback_note}",
-        )
-        self._event_sink("validation", "stage_complete", validation.model_dump_json())
-
-        self._event_sink("scoring", "stage_start", "Computing an explainable advisory score.")
-        scoring = self.scoring_agent.structured_output(
-            ScoringResult,
-            f"Compute an explainable score from this validation result: {validation.model_dump()}{feedback_note}",
-        )
-        self._event_sink("scoring", "stage_complete", scoring.model_dump_json())
-
-        result = {"extraction": extraction, "validation": validation, "scoring": scoring}
-        if document_bundle is not None:
-            result["embedding"] = embedding
+        result.update({"extraction": extraction, "validation": validation, "scoring": scoring})
         return result
 
 

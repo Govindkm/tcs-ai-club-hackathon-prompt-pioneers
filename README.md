@@ -164,9 +164,9 @@ from whatever mix of files an applicant submits, dispatching by extension:
 | `.zip` | Recursively extract every entry above (e.g. a whole submission folder), with entry-count/size/nesting-depth limits to prevent zip-bomb style DoS |
 
 Vision-OCR ([src/ingestion/vision.py](src/ingestion/vision.py)) calls a local Ollama vision
-model (`OLLAMA_HOST` + `OLLAMA_VISION_MODEL` in `.env`, default `minicpm-v` - strong OCR on
-dense document scans; `moondream` is a faster/lighter alternative, `llama3.2-vision` a
-heavier general-purpose one). Pull whichever model you configure, e.g. `ollama pull minicpm-v`
+model (`OLLAMA_HOST` + `OLLAMA_VISION_MODEL` in `.env`, default `qwen2.5vl:latest` - strong
+OCR/document understanding; `minicpm-v` and `moondream` are lighter alternatives, `llama3.2-vision`
+a heavier general-purpose one). Pull whichever model you configure, e.g. `ollama pull qwen2.5vl:latest`
 (the [Colab notebook](notebooks/colab_ollama_server.ipynb) has a cell for this).
 
 ## Running on Google Colab
@@ -315,6 +315,15 @@ streamlit run streamlit_app.py
 
 # 7. (Optional) Run the end-to-end LLM agent pipeline demo (requires model credentials)
 python scripts/run_pipeline_demo.py
+```
+
+Steps 4-7 can also be run in one go with [scripts/run_dev.ps1](scripts/run_dev.ps1), which
+seeds the DB and launches the backend + Streamlit UI in their own windows:
+
+```powershell
+.\scripts\run_dev.ps1                # seed + start API + Streamlit
+.\scripts\run_dev.ps1 -SkipSeed       # skip DB seeding
+.\scripts\run_dev.ps1 -RunAgentDemo   # also run scripts/run_pipeline_demo.py
 ```
 
 ## Status

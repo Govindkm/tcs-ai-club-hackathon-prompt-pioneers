@@ -10,6 +10,7 @@ import streamlit as st
 
 from app.api_client import BackendError
 from app.state import get_client
+from app.timeline import render_timeline
 
 _STATUS_LABELS = {
     "submitted": "Submitted",
@@ -87,6 +88,9 @@ def my_submissions_view(user: dict) -> None:
         label = f"#{sub['id']} · {scheme_label} · {_STATUS_LABELS.get(sub['status'], sub['status'])}"
         with st.expander(label):
             st.write(f"Submitted: {sub['created_at']}")
+            render_timeline(sub)
+            if sub.get("assigned_admin_name"):
+                st.caption(f"Being handled by: {sub['assigned_admin_name']}")
             if sub["analysis_status"] in ("queued", "running"):
                 st.info("Your application is being analyzed by our AI review pipeline...")
             elif sub["analysis_status"] == "failed":
@@ -95,6 +99,8 @@ def my_submissions_view(user: dict) -> None:
                 st.markdown(f"**Summary:** {sub['summary']}")
             if sub.get("score") is not None:
                 st.markdown(f"**Advisory score:** {sub['score']}")
+            if sub["timeline_stage"] == "completed":
+                st.success("Score approved by admins - your submission's review timeline is complete.")
 
             reviews = client.list_reviews(sub["id"])
             if sub["status"] in ("approved", "rejected"):
@@ -105,3 +111,26 @@ def my_submissions_view(user: dict) -> None:
                 st.warning(f"Reviewer requested more information: {reviews[-1]['rationale']}")
             else:
                 st.info("Your application is being processed.")
+
+            if sub.get("reevaluation_request"):
+                st.caption(
+                    f"📩 Re-evaluation requested ({sub.get('reevaluation_requested_at', '')}): "
+                    f"{sub['reevaluation_request']}"
+                )
+            with st.form(f"reevaluate_form_{sub['id']}"):
+                details = st.text_area(
+                    "Request a re-evaluation with changes (describe what to re-check or update)",
+                    key=f"reevaluate_details_{sub['id']}",
+                )
+                requested = st.form_submit_button("Request re-evaluation")
+            if requested:
+                if not details.strip():
+                    st.error("Please describe the change/clarification you want re-checked.")
+                else:
+                    try:
+                        client.request_reevaluation(sub["id"], details)
+                    except BackendError as exc:
+                        st.error(str(exc))
+                    else:
+                        st.success("Re-evaluation request sent to the admins.")
+                        st.rerun()

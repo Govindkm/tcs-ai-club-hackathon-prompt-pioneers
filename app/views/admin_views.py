@@ -10,6 +10,7 @@ import streamlit as st
 
 from app.api_client import BackendError
 from app.state import get_client
+from app.timeline import render_timeline
 
 _DECISION_OPTIONS = ["needs_more_info", "approved", "rejected"]
 _DECISION_LABELS = {
@@ -17,11 +18,16 @@ _DECISION_LABELS = {
     "approved": "Approve",
     "rejected": "Reject",
 }
-_ANALYSIS_STATUS_LABELS = {
-    "queued": "⏳ Queued",
-    "running": "⚙️ Running",
-    "completed": "✅ Completed",
-    "failed": "❌ Failed",
+_TIMELINE_STAGE_LABELS = {
+    "ingesting": "🟠 Ingesting & indexing",
+    "awaiting_admin_review": "🟠 Awaiting admin assignment",
+    "extraction_running": "🟢 Extraction running",
+    "validation_running": "🟢 Validation running",
+    "awaiting_admin_validation": "🟢 Awaiting admin validation review",
+    "scoring_running": "🟢 Scoring running",
+    "awaiting_score_approval": "🟠 Awaiting score approval",
+    "completed": "🟢 Completed",
+    "failed": "🔴 Failed",
 }
 _EVENT_ICONS = {
     "stage_start": "▶️",
@@ -48,31 +54,109 @@ def admin_submissions_view(user: dict) -> None:
     for sub in submissions:
         applicant_label = sub.get("applicant_name") or f"user #{sub['user_id']}"
         scheme_label = sub.get("scheme_name") or f"scheme #{sub['scheme_id']}"
-        analysis_badge = _ANALYSIS_STATUS_LABELS.get(sub["analysis_status"], sub["analysis_status"])
-        label = f"#{sub['id']} · {applicant_label} · {scheme_label} · {sub['status']} · {analysis_badge}"
+        timeline_label = _TIMELINE_STAGE_LABELS.get(sub["timeline_stage"], sub["timeline_stage"])
+        label = f"#{sub['id']} · {applicant_label} · {scheme_label} · {sub['status']} · {timeline_label}"
         with st.expander(label):
             st.write(f"Submitted: {sub['created_at']}")
-            st.text_area(
-                "Document content", sub["document_text"], height=150, disabled=True, key=f"doc_{sub['id']}"
-            )
+            render_timeline(sub)
+
+            assigned_label = sub.get("assigned_admin_name") or "Unassigned"
+            st.caption(f"Assigned admin: **{assigned_label}**")
 
             cols = st.columns([1, 4])
             if cols[0].button("🔄 Refresh", key=f"refresh_{sub['id']}"):
                 st.rerun()
-            cols[1].caption(
-                f"Analysis: {analysis_badge}"
-                + (f" ({sub['analysis_stage']})" if sub.get("analysis_stage") else "")
-            )
             if sub["analysis_status"] == "failed" and sub.get("analysis_error"):
                 st.error(f"Last analysis error: {sub['analysis_error']}")
+                if st.button("♻️ Restart pipeline from failed step", key=f"restart_{sub['id']}"):
+                    try:
+                        client.restart_pipeline(sub["id"])
+                    except BackendError as exc:
+                        st.error(str(exc))
+                    else:
+                        st.success("Pipeline restarted.")
+                        st.rerun()
+
+            if sub.get("reevaluation_request"):
+                st.info(
+                    f"📩 Applicant requested re-evaluation ({sub.get('reevaluation_requested_at', '')}): "
+                    f"{sub['reevaluation_request']}"
+                )
+
+            if sub.get("plagiarism_result"):
+                plag = sub["plagiarism_result"]
+                if plag.get("flagged"):
+                    st.warning("⚠️ Potential plagiarism/duplicate content detected against other indexed submissions.")
+                with st.expander("🔎 Plagiarism / duplicate-content check"):
+                    st.json(plag)
+
+            is_assigned_admin = sub.get("assigned_admin_id") == user["id"]
+
+            # --- Stage 1: assignment ---
+            if sub["timeline_stage"] == "awaiting_admin_review":
+                if st.button("🙋 Assign myself for AI analysis", key=f"assign_{sub['id']}"):
+                    try:
+                        client.assign_for_analysis(sub["id"])
+                    except BackendError as exc:
+                        st.error(str(exc))
+                    else:
+                        st.success("Assigned - extraction & validation started.")
+                        st.rerun()
 
             if sub.get("extracted_fields"):
+                st.markdown("**Extracted fields**")
                 st.json(sub["extracted_fields"])
+            if sub.get("summary"):
+                st.markdown(f"**Summary:** {sub['summary']}")
             if sub.get("validation_result"):
+                st.markdown("**Validation result**")
                 st.json(sub["validation_result"])
+            if sub.get("validation_feedback"):
+                st.caption(f"Last feedback given: {sub['validation_feedback']}")
+
+            # --- Stage 2: validation review (assigned admin only controls; all can view) ---
+            if sub["timeline_stage"] == "awaiting_admin_validation":
+                if is_assigned_admin:
+                    with st.form(f"validation_form_{sub['id']}"):
+                        feedback = st.text_area(
+                            "Instructions for the validation agent (optional - resumes/re-checks validation)",
+                            key=f"val_feedback_{sub['id']}",
+                        )
+                        resume = st.form_submit_button("🔁 Resume validation with feedback")
+                        complete = st.form_submit_button("✅ Mark validation complete → run scoring")
+                    if resume:
+                        if not feedback.strip():
+                            st.error("Provide instructions to resume validation.")
+                        else:
+                            client.submit_validation_feedback(sub["id"], feedback)
+                            st.success("Validation resumed with feedback.")
+                            st.rerun()
+                    if complete:
+                        client.complete_validation(sub["id"])
+                        st.success("Validation marked complete - scoring started.")
+                        st.rerun()
+                else:
+                    st.info(f"Awaiting {assigned_label}'s validation review.")
+
             if sub.get("score") is not None:
                 st.markdown(f"**Advisory score:** {sub['score']}")
                 st.json(sub["score_explanation"])
+
+            # --- Stage 3: score approval (any admin) ---
+            if sub["timeline_stage"] in ("awaiting_score_approval", "completed"):
+                approvals = client.list_score_approvals(sub["id"])
+                approver_ids = {a["admin_id"] for a in approvals}
+                st.caption(
+                    f"Score approvals: {len(approvals)}/2 "
+                    + (", ".join(a["admin_name"] for a in approvals) if approvals else "none yet")
+                )
+                if sub["timeline_stage"] == "awaiting_score_approval" and user["id"] not in approver_ids:
+                    if st.button("👍 Approve score", key=f"approve_score_{sub['id']}"):
+                        client.approve_score(sub["id"])
+                        st.success("Score approval recorded.")
+                        st.rerun()
+                elif sub["timeline_stage"] == "completed":
+                    st.success("This submission's timeline is complete.")
 
             with st.expander("🧠 AI reasoning & thinking (live log)"):
                 events = client.list_analysis_events(sub["id"])
@@ -86,20 +170,21 @@ def admin_submissions_view(user: dict) -> None:
                 if st.button("🔄 Refresh log", key=f"refresh_events_{sub['id']}"):
                     st.rerun()
 
-            with st.form(f"analyze_form_{sub['id']}"):
-                feedback = st.text_area(
-                    "Feedback for the AI (optional - human-in-the-loop guidance incorporated into the next run)",
-                    key=f"feedback_{sub['id']}",
-                )
-                run_analysis = st.form_submit_button("Run/re-run AI analysis")
-            if run_analysis:
-                try:
-                    client.analyze_application(sub["id"], feedback=feedback)
-                except BackendError as exc:
-                    st.error(str(exc))
-                else:
-                    st.success("Analysis queued - refresh in a few seconds to see progress.")
-                    st.rerun()
+            with st.expander("🔧 Legacy: manual re-run (feedback-only retry)"):
+                with st.form(f"analyze_form_{sub['id']}"):
+                    feedback = st.text_area(
+                        "Feedback for the AI (optional - human-in-the-loop guidance incorporated into the next run)",
+                        key=f"feedback_{sub['id']}",
+                    )
+                    run_analysis = st.form_submit_button("Re-run extraction/validation")
+                if run_analysis:
+                    try:
+                        client.analyze_application(sub["id"], feedback=feedback)
+                    except BackendError as exc:
+                        st.error(str(exc))
+                    else:
+                        st.success("Analysis restarted - refresh in a few seconds to see progress.")
+                        st.rerun()
 
             reviews = client.list_reviews(sub["id"])
             if reviews:
@@ -184,3 +269,64 @@ def admin_notifications_view(user: dict) -> None:
         if cols[1].button("Remove", key=f"remove_note_{note['id']}"):
             client.deactivate_notification(note["id"])
             st.rerun()
+
+
+def admin_users_view(user: dict) -> None:
+    st.subheader("Manage Admins & Users")
+    client = get_client()
+
+    st.markdown("### Create a new admin")
+    with st.form("new_admin_form"):
+        full_name = st.text_input("Full name")
+        email = st.text_input("Email (optional)")
+        username = st.text_input("Username")
+        password = st.text_input("Temporary password", type="password")
+        submitted = st.form_submit_button("Create admin")
+    if submitted:
+        if not full_name.strip() or not username.strip() or len(password) < 8:
+            st.error("Full name and username are required; password must be at least 8 characters.")
+        else:
+            try:
+                client.create_admin(username.strip(), password, full_name.strip(), email.strip() or None)
+            except BackendError as exc:
+                st.error(str(exc))
+            else:
+                st.success(f"Admin '{username}' created.")
+                st.rerun()
+
+    st.divider()
+    st.markdown("### All users")
+    for u in client.list_users():
+        cols = st.columns([3, 2, 2, 2, 2])
+        status_label = "🟢 Active" if u["is_active"] else "🔴 Deactivated"
+        org_suffix = f" · {u['organisation_name']}" if u.get("organisation_name") else ""
+        cols[0].write(f"**{u['full_name']}** (@{u['username']}){org_suffix}")
+        if u.get("email"):
+            cols[0].caption(u["email"])
+        cols[1].caption(u["role"])
+        cols[2].caption(status_label)
+
+        is_self = u["id"] == user["id"]
+        toggle_label = "Deactivate" if u["is_active"] else "Activate"
+        if cols[3].button(toggle_label, key=f"toggle_user_{u['id']}", disabled=is_self):
+            try:
+                client.set_user_active(u["id"], not u["is_active"])
+            except BackendError as exc:
+                st.error(str(exc))
+            else:
+                st.rerun()
+
+        with cols[4].popover("Reset password"):
+            new_password = st.text_input(
+                "New password", type="password", key=f"reset_pw_{u['id']}", help="At least 8 characters."
+            )
+            if st.button("Confirm reset", key=f"confirm_reset_{u['id']}"):
+                if len(new_password) < 8:
+                    st.error("Password must be at least 8 characters.")
+                else:
+                    try:
+                        client.reset_user_password(u["id"], new_password)
+                    except BackendError as exc:
+                        st.error(str(exc))
+                    else:
+                        st.success("Password reset.")

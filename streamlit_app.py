@@ -10,7 +10,12 @@ from __future__ import annotations
 import streamlit as st
 
 from app.state import get_current_user, logout
-from app.views.admin_views import admin_notifications_view, admin_schemes_view, admin_submissions_view
+from app.views.admin_views import (
+    admin_notifications_view,
+    admin_schemes_view,
+    admin_submissions_view,
+    admin_users_view,
+)
 from app.views.applicant_views import my_submissions_view, schemes_view, submit_view
 from app.views.auth_views import login_view, register_view
 from app.views.notifications_view import notifications_banner
@@ -34,7 +39,9 @@ if st.sidebar.button("Log out"):
     st.rerun()
 
 if user["role"] == "admin":
-    page = st.sidebar.radio("Navigate", ["Review Submissions", "Manage Schemes", "Notifications"])
+    page = st.sidebar.radio(
+        "Navigate", ["Review Submissions", "Manage Schemes", "Notifications", "Manage Admins & Users"]
+    )
 else:
     page = st.sidebar.radio("Navigate", ["Schemes", "Submit Application", "My Submissions"])
 
@@ -48,6 +55,8 @@ if user["role"] == "admin":
         admin_schemes_view(user)
     elif page == "Notifications":
         admin_notifications_view(user)
+    elif page == "Manage Admins & Users":
+        admin_users_view(user)
 else:
     if page == "Schemes":
         schemes_view()

@@ -12,4 +12,4 @@ providers:
     model_id: ${OLLAMA_MODEL_ID}
     host: ${OLLAMA_HOST}
 
-default_provider: ${STRANDS_MODEL_PROVIDER:-bedrock}
+default_provider: ${STRANDS_MODEL_PROVIDER:-ollama}

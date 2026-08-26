@@ -37,4 +37,23 @@ def index_document_bundle(
     return {"scheme_id": scheme_id, "submission_id": submission_id, **result}
 
 
-TOOLS = [index_document_bundle]
+@tool
+def check_document_similarity(document_bundle: str, submission_id: int, similarity_threshold: float = 0.82) -> dict:
+    """Check a submission's documents for plagiarized/copied content against everything
+    else already indexed locally (other submissions), excluding the submission itself.
+
+    Args:
+        document_bundle: JSON array containing title, extension, metadata, and content.
+        submission_id: SQLite submission identifier (excluded from the similarity search).
+        similarity_threshold: Minimum cosine similarity (0-1) to flag as a potential match.
+    """
+    try:
+        documents = json.loads(document_bundle)
+    except (TypeError, json.JSONDecodeError) as exc:
+        raise ValueError("document_bundle must be valid JSON.") from exc
+    if not isinstance(documents, list):
+        raise ValueError("document_bundle must be a JSON array.")
+    return _STORE.check_plagiarism(documents, submission_id, similarity_threshold=similarity_threshold)
+
+
+TOOLS = [index_document_bundle, check_document_similarity]

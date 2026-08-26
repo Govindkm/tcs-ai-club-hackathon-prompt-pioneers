@@ -33,6 +33,38 @@ def test_duplicate_username_rejected():
         db.create_user(username="carol", password="OtherPass1!", full_name="Carol Dup", role="applicant")
 
 
+def test_deactivated_user_cannot_authenticate():
+    user_id = db.create_user(username="frank", password="Sup3rSecret!", full_name="Frank F", role="applicant")
+    db.set_user_active(user_id, False)
+    assert db.authenticate("frank", "Sup3rSecret!") is None
+    db.set_user_active(user_id, True)
+    assert db.authenticate("frank", "Sup3rSecret!") is not None
+
+
+def test_list_and_get_users_exclude_password_hash():
+    db.create_user(username="gina", password="Sup3rSecret!", full_name="Gina G", role="applicant")
+    users = db.list_users()
+    assert len(users) == 1
+    assert "password_hash" not in users[0]
+    fetched = db.get_user(users[0]["id"])
+    assert fetched["username"] == "gina"
+
+
+def test_count_active_admins_excludes_given_user_and_inactive():
+    admin1 = db.create_user(username="admin_a", password="Sup3rSecret!", full_name="Admin A", role="admin")
+    admin2 = db.create_user(username="admin_b", password="Sup3rSecret!", full_name="Admin B", role="admin")
+    assert db.count_active_admins(exclude_user_id=admin1) == 1
+    db.set_user_active(admin2, False)
+    assert db.count_active_admins(exclude_user_id=admin1) == 0
+
+
+def test_reset_password_changes_credentials():
+    user_id = db.create_user(username="hank", password="OldPass123!", full_name="Hank H", role="applicant")
+    db.reset_password(user_id, "NewPass456!")
+    assert db.authenticate("hank", "OldPass123!") is None
+    assert db.authenticate("hank", "NewPass456!") is not None
+
+
 def test_submission_lifecycle_and_user_isolation():
     applicant_id = db.create_user(username="dave", password="Sup3rSecret!", full_name="Dave D", role="applicant")
     other_id = db.create_user(username="erin", password="Sup3rSecret!", full_name="Erin E", role="applicant")

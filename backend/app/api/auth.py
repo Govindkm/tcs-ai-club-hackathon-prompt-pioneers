@@ -15,11 +15,23 @@ def register(payload: RegisterRequest) -> UserOut:
     # Self-registration always creates an applicant - admins are provisioned via scripts/seed_db.py.
     try:
         user_id = db.create_user(
-            username=payload.username, password=payload.password, full_name=payload.full_name, role="applicant"
+            username=payload.username,
+            password=payload.password,
+            full_name=payload.full_name,
+            role="applicant",
+            email=payload.email,
+            organisation_name=payload.organisation_name,
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-    return UserOut(id=user_id, username=payload.username, full_name=payload.full_name, role="applicant")
+    return UserOut(
+        id=user_id,
+        username=payload.username,
+        full_name=payload.full_name,
+        role="applicant",
+        email=payload.email,
+        organisation_name=payload.organisation_name,
+    )
 
 
 @router.post("/login", response_model=TokenResponse)

@@ -31,14 +31,22 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
 # Users / auth
 # ---------------------------------------------------------------------------
 
-def create_user(username: str, password: str, full_name: str, role: str = "applicant") -> int:
+def create_user(
+    username: str,
+    password: str,
+    full_name: str,
+    role: str = "applicant",
+    email: str | None = None,
+    organisation_name: str | None = None,
+) -> int:
     if role not in _VALID_ROLES:
         raise ValueError(f"Invalid role: {role}")
     conn = get_connection()
     try:
         cur = conn.execute(
-            "INSERT INTO users (username, password_hash, full_name, role) VALUES (?, ?, ?, ?)",
-            (username, _hash_password(password), full_name, role),
+            "INSERT INTO users (username, password_hash, full_name, role, email, organisation_name) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (username, _hash_password(password), full_name, role, email, organisation_name),
         )
         conn.commit()
         return cur.lastrowid
@@ -52,16 +60,77 @@ def authenticate(username: str, password: str) -> dict | None:
     conn = get_connection()
     try:
         row = conn.execute(
-            "SELECT id, username, password_hash, full_name, role FROM users WHERE username = ?",
+            "SELECT id, username, password_hash, full_name, role, is_active, email, organisation_name "
+            "FROM users WHERE username = ?",
             (username,),
         ).fetchone()
     finally:
         conn.close()
-    if row is None or not _verify_password(password, row["password_hash"]):
+    if row is None or not row["is_active"] or not _verify_password(password, row["password_hash"]):
         return None
     user = _row_to_dict(row)
     user.pop("password_hash")
     return user
+
+
+def list_users(role: str | None = None) -> list[dict]:
+    query = "SELECT id, username, full_name, role, is_active, email, organisation_name, created_at FROM users"
+    params: tuple = ()
+    if role:
+        query += " WHERE role = ?"
+        params = (role,)
+    query += " ORDER BY created_at DESC"
+    conn = get_connection()
+    try:
+        rows = conn.execute(query, params).fetchall()
+    finally:
+        conn.close()
+    return [_row_to_dict(r) for r in rows]
+
+
+def get_user(user_id: int) -> dict | None:
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT id, username, full_name, role, is_active, email, organisation_name, created_at "
+            "FROM users WHERE id = ?",
+            (user_id,),
+        ).fetchone()
+    finally:
+        conn.close()
+    return _row_to_dict(row) if row else None
+
+
+def count_active_admins(exclude_user_id: int | None = None) -> int:
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT COUNT(*) AS c FROM users WHERE role = 'admin' AND is_active = 1 AND id != ?",
+            (exclude_user_id or -1,),
+        ).fetchone()
+    finally:
+        conn.close()
+    return row["c"]
+
+
+def set_user_active(user_id: int, is_active: bool) -> None:
+    conn = get_connection()
+    try:
+        conn.execute("UPDATE users SET is_active = ? WHERE id = ?", (int(is_active), user_id))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def reset_password(user_id: int, new_password: str) -> None:
+    conn = get_connection()
+    try:
+        conn.execute(
+            "UPDATE users SET password_hash = ? WHERE id = ?", (_hash_password(new_password), user_id)
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 # ---------------------------------------------------------------------------
@@ -121,7 +190,14 @@ def set_scheme_active(scheme_id: int, is_active: bool) -> None:
 # ---------------------------------------------------------------------------
 
 def _parse_submission_json(sub: dict) -> dict:
-    for field in ("extracted_fields", "validation_result", "score_explanation", "document_manifest"):
+    for field in (
+        "extracted_fields",
+        "validation_result",
+        "score_explanation",
+        "document_manifest",
+        "plagiarism_result",
+        "raw_files",
+    ):
         if sub.get(field):
             sub[field] = json.loads(sub[field])
     return sub
@@ -241,7 +317,16 @@ def list_analysis_events(submission_id: int, after_id: int = 0) -> list[dict]:
 def get_submission(submission_id: int) -> dict | None:
     conn = get_connection()
     try:
-        row = conn.execute("SELECT * FROM submissions WHERE id = ?", (submission_id,)).fetchone()
+        row = conn.execute(
+            "SELECT sub.*, sc.name AS scheme_name, u.full_name AS applicant_name, "
+            "u.organisation_name AS applicant_organisation, "
+            "admin.full_name AS assigned_admin_name FROM submissions sub "
+            "JOIN schemes sc ON sub.scheme_id = sc.id "
+            "JOIN users u ON sub.user_id = u.id "
+            "LEFT JOIN users admin ON sub.assigned_admin_id = admin.id "
+            "WHERE sub.id = ?",
+            (submission_id,),
+        ).fetchone()
     finally:
         conn.close()
     return _parse_submission_json(_row_to_dict(row)) if row else None
@@ -251,8 +336,9 @@ def list_submissions_for_user(user_id: int) -> list[dict]:
     conn = get_connection()
     try:
         rows = conn.execute(
-            "SELECT sub.*, sc.name AS scheme_name FROM submissions sub "
+            "SELECT sub.*, sc.name AS scheme_name, admin.full_name AS assigned_admin_name FROM submissions sub "
             "JOIN schemes sc ON sub.scheme_id = sc.id "
+            "LEFT JOIN users admin ON sub.assigned_admin_id = admin.id "
             "WHERE sub.user_id = ? ORDER BY sub.created_at DESC",
             (user_id,),
         ).fetchall()
@@ -263,9 +349,12 @@ def list_submissions_for_user(user_id: int) -> list[dict]:
 
 def list_all_submissions(status: str | None = None) -> list[dict]:
     query = (
-        "SELECT sub.*, sc.name AS scheme_name, u.full_name AS applicant_name FROM submissions sub "
+        "SELECT sub.*, sc.name AS scheme_name, u.full_name AS applicant_name, "
+        "u.organisation_name AS applicant_organisation, "
+        "admin.full_name AS assigned_admin_name FROM submissions sub "
         "JOIN schemes sc ON sub.scheme_id = sc.id "
-        "JOIN users u ON sub.user_id = u.id"
+        "JOIN users u ON sub.user_id = u.id "
+        "LEFT JOIN users admin ON sub.assigned_admin_id = admin.id"
     )
     params: tuple = ()
     if status:
@@ -278,6 +367,148 @@ def list_all_submissions(status: str | None = None) -> list[dict]:
     finally:
         conn.close()
     return [_parse_submission_json(_row_to_dict(r)) for r in rows]
+
+
+def set_timeline_stage(submission_id: int, timeline_stage: str) -> None:
+    conn = get_connection()
+    try:
+        conn.execute(
+            "UPDATE submissions SET timeline_stage = ?, updated_at = datetime('now') WHERE id = ?",
+            (timeline_stage, submission_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def assign_admin(submission_id: int, admin_id: int) -> bool:
+    """Claim a submission for AI-analysis oversight. Returns False if already assigned to someone else."""
+    conn = get_connection()
+    try:
+        row = conn.execute("SELECT assigned_admin_id FROM submissions WHERE id = ?", (submission_id,)).fetchone()
+        if row is None:
+            return False
+        if row["assigned_admin_id"] is not None and row["assigned_admin_id"] != admin_id:
+            return False
+        conn.execute(
+            "UPDATE submissions SET assigned_admin_id = ?, updated_at = datetime('now') WHERE id = ?",
+            (admin_id, submission_id),
+        )
+        conn.commit()
+        return True
+    finally:
+        conn.close()
+
+
+def save_plagiarism_result(submission_id: int, plagiarism_result: dict) -> None:
+    conn = get_connection()
+    try:
+        conn.execute(
+            "UPDATE submissions SET plagiarism_result = ?, updated_at = datetime('now') WHERE id = ?",
+            (json.dumps(plagiarism_result), submission_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def save_extraction_and_validation(
+    submission_id: int, extracted_fields: dict, summary: str, validation_result: dict
+) -> None:
+    conn = get_connection()
+    try:
+        conn.execute(
+            "UPDATE submissions SET extracted_fields = ?, summary = ?, validation_result = ?, "
+            "updated_at = datetime('now') WHERE id = ?",
+            (json.dumps(extracted_fields), summary, json.dumps(validation_result), submission_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def save_validation_result(submission_id: int, validation_result: dict, feedback: str | None = None) -> None:
+    conn = get_connection()
+    try:
+        conn.execute(
+            "UPDATE submissions SET validation_result = ?, validation_feedback = COALESCE(?, validation_feedback), "
+            "updated_at = datetime('now') WHERE id = ?",
+            (json.dumps(validation_result), feedback, submission_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def save_scoring_result(submission_id: int, score: float, score_explanation: dict) -> None:
+    conn = get_connection()
+    try:
+        conn.execute(
+            "UPDATE submissions SET score = ?, score_explanation = ?, status = 'under_review', "
+            "updated_at = datetime('now') WHERE id = ?",
+            (score, json.dumps(score_explanation), submission_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def request_reevaluation(submission_id: int, details: str) -> None:
+    """Record the submitting applicant's request for admins to reevaluate with changes."""
+    conn = get_connection()
+    try:
+        conn.execute(
+            "UPDATE submissions SET reevaluation_request = ?, reevaluation_requested_at = datetime('now'), "
+            "updated_at = datetime('now') WHERE id = ?",
+            (details, submission_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def save_raw_files(submission_id: int, raw_files: list[dict], pasted_text: str) -> None:
+    """Persist the manifest of originally-uploaded files (+ pasted text) so ingestion
+    (including OCR) can be retried later without requiring the applicant to re-upload."""
+    conn = get_connection()
+    try:
+        conn.execute(
+            "UPDATE submissions SET raw_files = ?, pasted_text = ?, updated_at = datetime('now') WHERE id = ?",
+            (json.dumps(raw_files), pasted_text, submission_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def add_score_approval(submission_id: int, admin_id: int) -> int:
+    """Record a distinct admin's approval of the score; returns the total distinct-approval count."""
+    conn = get_connection()
+    try:
+        conn.execute(
+            "INSERT OR IGNORE INTO score_approvals (submission_id, admin_id) VALUES (?, ?)",
+            (submission_id, admin_id),
+        )
+        conn.commit()
+        count = conn.execute(
+            "SELECT COUNT(*) AS c FROM score_approvals WHERE submission_id = ?", (submission_id,)
+        ).fetchone()["c"]
+        return count
+    finally:
+        conn.close()
+
+
+def list_score_approvals(submission_id: int) -> list[dict]:
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT sa.*, u.full_name AS admin_name FROM score_approvals sa "
+            "JOIN users u ON sa.admin_id = u.id WHERE sa.submission_id = ? ORDER BY sa.created_at ASC",
+            (submission_id,),
+        ).fetchall()
+    finally:
+        conn.close()
+    return [_row_to_dict(r) for r in rows]
 
 
 # ---------------------------------------------------------------------------
@@ -318,7 +549,7 @@ def list_reviews_for_submission(submission_id: int) -> list[dict]:
 # Notifications
 # ---------------------------------------------------------------------------
 
-def create_notification(title: str, message: str, created_by: int) -> int:
+def create_notification(title: str, message: str, created_by: int | None) -> int:
     conn = get_connection()
     try:
         cur = conn.execute(

@@ -38,13 +38,38 @@ class BackendClient:
         return response.json() if response.content else None
 
     # --- auth ---
-    def register(self, username: str, password: str, full_name: str) -> dict:
+    def register(self, username: str, password: str, full_name: str, email: str, organisation_name: str) -> dict:
         return self._request(
-            "POST", "/api/v1/auth/register", json={"username": username, "password": password, "full_name": full_name}
+            "POST",
+            "/api/v1/auth/register",
+            json={
+                "username": username,
+                "password": password,
+                "full_name": full_name,
+                "email": email,
+                "organisation_name": organisation_name,
+            },
         )
 
     def login(self, username: str, password: str) -> dict:
         return self._request("POST", "/api/v1/auth/login", json={"username": username, "password": password})
+
+    # --- users (admin management) ---
+    def list_users(self) -> list[dict]:
+        return self._request("GET", "/api/v1/users")
+
+    def create_admin(self, username: str, password: str, full_name: str, email: str | None = None) -> dict:
+        return self._request(
+            "POST",
+            "/api/v1/users/admins",
+            json={"username": username, "password": password, "full_name": full_name, "email": email},
+        )
+
+    def set_user_active(self, user_id: int, is_active: bool) -> dict:
+        return self._request("PATCH", f"/api/v1/users/{user_id}/active", params={"is_active": is_active})
+
+    def reset_user_password(self, user_id: int, new_password: str) -> None:
+        self._request("POST", f"/api/v1/users/{user_id}/reset-password", json={"new_password": new_password})
 
     # --- schemes ---
     def list_schemes(self, active_only: bool = True) -> list[dict]:
@@ -100,6 +125,37 @@ class BackendClient:
         return self._request(
             "POST", f"/api/v1/applications/{application_id}/analyze", json={"feedback": feedback}
         )
+
+    def assign_for_analysis(self, application_id: int) -> dict:
+        """Claim a submission to run/oversee its AI analysis (extraction + validation)."""
+        return self._request("POST", f"/api/v1/applications/{application_id}/assign")
+
+    def submit_validation_feedback(self, application_id: int, feedback: str) -> dict:
+        """Assigned admin gives text instructions; loops the validation stage again."""
+        return self._request(
+            "POST", f"/api/v1/applications/{application_id}/validation/feedback", json={"feedback": feedback}
+        )
+
+    def complete_validation(self, application_id: int) -> dict:
+        """Assigned admin marks validation complete, advancing the case to scoring."""
+        return self._request("POST", f"/api/v1/applications/{application_id}/validation/complete")
+
+    def approve_score(self, application_id: int) -> dict:
+        """Any admin approves the computed score; >=2 distinct approvals completes the timeline."""
+        return self._request("POST", f"/api/v1/applications/{application_id}/score/approve")
+
+    def restart_pipeline(self, application_id: int) -> dict:
+        """Admin-only: restart the pipeline from whichever stage failed."""
+        return self._request("POST", f"/api/v1/applications/{application_id}/restart")
+
+    def request_reevaluation(self, application_id: int, details: str) -> dict:
+        """Applicant-only: flag the submission for admins to reevaluate with changes."""
+        return self._request(
+            "POST", f"/api/v1/applications/{application_id}/request-reevaluation", json={"details": details}
+        )
+
+    def list_score_approvals(self, application_id: int) -> list[dict]:
+        return self._request("GET", f"/api/v1/applications/{application_id}/score/approvals")
 
     def list_reviews(self, application_id: int) -> list[dict]:
         return self._request("GET", f"/api/v1/applications/{application_id}/reviews")

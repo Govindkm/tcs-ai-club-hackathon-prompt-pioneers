@@ -17,6 +17,7 @@ def test_skills_directory_has_expected_packages():
         "completeness-validation",
         "explainable-scoring",
         "reviewer-workflow",
+        "embedding-storage",
     }
 
 

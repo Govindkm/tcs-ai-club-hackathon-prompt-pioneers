@@ -1,4 +1,5 @@
 """Unit tests for tool logic - no live model calls, pure function tests."""
+from src.tools import verification_tools
 from src.tools.document_tools import extract_fields, summarize_document
 from src.tools.scoring_tools import apply_rule_score
 from src.tools.validation_tools import check_completeness, flag_authenticity_risks
@@ -28,6 +29,41 @@ def test_flag_authenticity_risks_detects_duplicates():
     result = flag_authenticity_risks({"amounts_found": ["100", "100"]})
     assert "duplicate_amount_values" in result["risk_flags"]
     assert result["requires_human_review"] is True
+
+
+def test_verify_organisation_online_skips_without_api_key(monkeypatch):
+    monkeypatch.delenv("EXA_API_KEY", raising=False)
+    monkeypatch.setattr(verification_tools, "_client", None)
+    result = verification_tools.verify_organisation_online("Acme Renewables Pvt Ltd")
+    assert result["checked"] is False
+
+
+def test_verify_organisation_online_requires_a_name():
+    result = verification_tools.verify_organisation_online("")
+    assert result["checked"] is False
+
+
+def test_verify_organisation_online_returns_matches(monkeypatch):
+    class _FakeResult:
+        def __init__(self, title, url, highlights):
+            self.title = title
+            self.url = url
+            self.highlights = highlights
+
+    class _FakeResponse:
+        def __init__(self):
+            self.results = [_FakeResult("Acme Renewables", "https://acme.example", ["Acme Renewables is..."])]
+
+    class _FakeClient:
+        def search(self, *args, **kwargs):
+            return _FakeResponse()
+
+    monkeypatch.setattr(verification_tools, "_get_client", lambda: _FakeClient())
+    result = verification_tools.verify_organisation_online("Acme Renewables")
+    assert result["checked"] is True
+    assert result["has_online_presence"] is True
+    assert result["match_count"] == 1
+    assert result["matches"][0]["url"] == "https://acme.example"
 
 
 def test_apply_rule_score_penalizes_risk():
