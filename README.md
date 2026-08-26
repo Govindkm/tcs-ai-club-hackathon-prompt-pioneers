@@ -79,6 +79,7 @@ The POC must demonstrate every normalized capability from the eight relevant pro
 ├── data/                  # Synthetic dataset generation & samples (non-sensitive only); app.db (gitignored)
 ├── config/
 │   ├── models.yaml        # Model provider config (Bedrock/Anthropic/OpenAI/Ollama)
+│   ├── database.yaml      # Database backend config (sqlite/postgres adapters)
 │   └── agents.yaml        # Declarative agent -> tools/skills mapping
 ├── skills/                # Agent Skills (SKILL.md packages, per agentskills.io spec)
 │   ├── document-extraction/        # Extraction & summarization instructions
@@ -97,7 +98,7 @@ The POC must demonstrate every normalized capability from the eight relevant pro
 │   │   ├── validation_tools.py    # Completeness & authenticity-risk tools
 │   │   ├── scoring_tools.py       # Configurable rules + explainable scoring tools
 │   │   └── workflow_tools.py      # Reviewer routing, decision recording, audit trail
-│   ├── db/                 # SQLite schema + repository (users, schemes, submissions, reviews, notifications)
+│   ├── db/                 # Pluggable DB layer: config + adapters, schema, repository
 │   ├── ingestion/         # Heterogeneous file/zip extraction (document_reader.py) + vision OCR (vision.py)
 │   ├── analytics/         # Operational analytics & reporting
 │   ├── adapters/          # Mock adapters (schemes portal, messaging, identity)

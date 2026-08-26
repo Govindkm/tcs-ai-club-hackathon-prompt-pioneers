@@ -1,0 +1,22 @@
+# Central database configuration.
+# Keeps storage selection out of the repository/schema code: switching backends is a
+# config change (or APP_DB_BACKEND env var), not a code change. Each backend name maps
+# to an adapter registered in src/db/adapters/.
+backends:
+  sqlite:
+    adapter: sqlite
+    path: ${APP_DB_PATH:-data/app.db}
+    timeout_seconds: ${APP_DB_TIMEOUT:-30}
+
+  postgres:
+    adapter: postgres
+    # A full DSN wins over the discrete fields below when set.
+    dsn: ${APP_DB_DSN:-}
+    host: ${POSTGRES_HOST:-localhost}
+    port: ${POSTGRES_PORT:-5432}
+    database: ${POSTGRES_DB:-prompt_pioneers}
+    user: ${POSTGRES_USER:-postgres}
+    password: ${POSTGRES_PASSWORD:-}
+    sslmode: ${POSTGRES_SSLMODE:-prefer}
+
+default_backend: ${APP_DB_BACKEND:-sqlite}

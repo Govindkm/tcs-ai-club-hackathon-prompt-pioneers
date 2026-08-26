@@ -1,151 +1,150 @@
-"""SQLite schema definition and initialization."""
+"""Dialect-neutral schema definition and initialization.
+
+Column types and defaults are written as tokens ({pk}, {text}, {now}, ...) that the
+active adapter renders for its dialect, so a new backend needs no schema changes.
+"""
 from __future__ import annotations
 
-from src.db.connection import get_connection
+from src.db.connection import get_adapter, get_database
 
-_SCHEMA = """
+_SCHEMA_TEMPLATE = """
 CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT UNIQUE NOT NULL,
-    password_hash TEXT NOT NULL,
-    full_name TEXT NOT NULL,
-    email TEXT,
-    organisation_name TEXT,
-    role TEXT NOT NULL CHECK (role IN ('admin', 'applicant')),
-    is_active INTEGER NOT NULL DEFAULT 1,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    id {pk},
+    username {text} UNIQUE NOT NULL,
+    password_hash {text} NOT NULL,
+    full_name {text} NOT NULL,
+    email {text},
+    organisation_name {text},
+    role {text} NOT NULL CHECK (role IN ('admin', 'applicant')),
+    is_active {int} NOT NULL DEFAULT 1,
+    created_at {timestamp} NOT NULL DEFAULT {now}
 );
 
 CREATE TABLE IF NOT EXISTS schemes (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    description TEXT NOT NULL,
-    eligibility TEXT NOT NULL DEFAULT '',
-    required_documents TEXT NOT NULL DEFAULT '',
-    is_active INTEGER NOT NULL DEFAULT 1,
-    created_by INTEGER REFERENCES users(id),
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    pending_update TEXT,
-    pending_update_by INTEGER REFERENCES users(id),
-    pending_update_at TEXT,
-    scoring_pattern TEXT
+    id {pk},
+    name {text} NOT NULL,
+    description {text} NOT NULL,
+    eligibility {text} NOT NULL DEFAULT '',
+    required_documents {text} NOT NULL DEFAULT '',
+    is_active {int} NOT NULL DEFAULT 1,
+    created_by {int} REFERENCES users(id),
+    created_at {timestamp} NOT NULL DEFAULT {now},
+    pending_update {text},
+    pending_update_by {int} REFERENCES users(id),
+    pending_update_at {timestamp},
+    scoring_pattern {text}
 );
 
 CREATE TABLE IF NOT EXISTS scheme_update_approvals (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    scheme_id INTEGER NOT NULL REFERENCES schemes(id),
-    admin_id INTEGER NOT NULL REFERENCES users(id),
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    id {pk},
+    scheme_id {int} NOT NULL REFERENCES schemes(id),
+    admin_id {int} NOT NULL REFERENCES users(id),
+    created_at {timestamp} NOT NULL DEFAULT {now},
     UNIQUE(scheme_id, admin_id)
 );
 
 CREATE TABLE IF NOT EXISTS submissions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL REFERENCES users(id),
-    scheme_id INTEGER NOT NULL REFERENCES schemes(id),
-    applicant_notes TEXT NOT NULL DEFAULT '',
-    document_text TEXT NOT NULL DEFAULT '',
-    document_manifest TEXT NOT NULL DEFAULT '[]',
-    status TEXT NOT NULL DEFAULT 'submitted'
+    id {pk},
+    user_id {int} NOT NULL REFERENCES users(id),
+    scheme_id {int} NOT NULL REFERENCES schemes(id),
+    applicant_notes {text} NOT NULL DEFAULT '',
+    document_text {text} NOT NULL DEFAULT '',
+    document_manifest {text} NOT NULL DEFAULT '[]',
+    status {text} NOT NULL DEFAULT 'submitted'
         CHECK (status IN ('submitted', 'under_review', 'needs_more_info', 'approved', 'rejected')),
-    analysis_status TEXT NOT NULL DEFAULT 'queued'
+    analysis_status {text} NOT NULL DEFAULT 'queued'
         CHECK (analysis_status IN ('queued', 'running', 'completed', 'failed')),
-    analysis_stage TEXT,
-    analysis_error TEXT,
-    extracted_fields TEXT,
-    summary TEXT,
-    validation_result TEXT,
-    score REAL,
-    score_explanation TEXT,
-    timeline_stage TEXT NOT NULL DEFAULT 'ingesting',
-    assigned_admin_id INTEGER REFERENCES users(id),
-    plagiarism_result TEXT,
-    validation_feedback TEXT,
-    reevaluation_request TEXT,
-    reevaluation_requested_at TEXT,
-    raw_files TEXT,
-    pasted_text TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    analysis_stage {text},
+    analysis_error {text},
+    extracted_fields {text},
+    summary {text},
+    validation_result {text},
+    score {float},
+    score_explanation {text},
+    timeline_stage {text} NOT NULL DEFAULT 'ingesting',
+    assigned_admin_id {int} REFERENCES users(id),
+    plagiarism_result {text},
+    validation_feedback {text},
+    reevaluation_request {text},
+    reevaluation_requested_at {timestamp},
+    raw_files {text},
+    pasted_text {text},
+    created_at {timestamp} NOT NULL DEFAULT {now},
+    updated_at {timestamp} NOT NULL DEFAULT {now}
 );
 
 CREATE TABLE IF NOT EXISTS score_approvals (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    submission_id INTEGER NOT NULL REFERENCES submissions(id),
-    admin_id INTEGER NOT NULL REFERENCES users(id),
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    id {pk},
+    submission_id {int} NOT NULL REFERENCES submissions(id),
+    admin_id {int} NOT NULL REFERENCES users(id),
+    created_at {timestamp} NOT NULL DEFAULT {now},
     UNIQUE(submission_id, admin_id)
 );
 
 CREATE TABLE IF NOT EXISTS analysis_events (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    submission_id INTEGER NOT NULL REFERENCES submissions(id),
-    stage TEXT NOT NULL,
-    event_type TEXT NOT NULL
+    id {pk},
+    submission_id {int} NOT NULL REFERENCES submissions(id),
+    stage {text} NOT NULL,
+    event_type {text} NOT NULL
         CHECK (event_type IN ('stage_start', 'reasoning', 'text', 'tool_call', 'stage_complete', 'error')),
-    content TEXT NOT NULL DEFAULT '',
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    content {text} NOT NULL DEFAULT '',
+    created_at {timestamp} NOT NULL DEFAULT {now}
 );
 
 CREATE TABLE IF NOT EXISTS reviews (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    submission_id INTEGER NOT NULL REFERENCES submissions(id),
-    reviewer_id INTEGER NOT NULL REFERENCES users(id),
-    decision TEXT NOT NULL,
-    rationale TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    id {pk},
+    submission_id {int} NOT NULL REFERENCES submissions(id),
+    reviewer_id {int} NOT NULL REFERENCES users(id),
+    decision {text} NOT NULL,
+    rationale {text} NOT NULL,
+    created_at {timestamp} NOT NULL DEFAULT {now}
 );
 
 CREATE TABLE IF NOT EXISTS notifications (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    title TEXT NOT NULL,
-    message TEXT NOT NULL,
-    created_by INTEGER REFERENCES users(id),
-    is_active INTEGER NOT NULL DEFAULT 1,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    id {pk},
+    title {text} NOT NULL,
+    message {text} NOT NULL,
+    created_by {int} REFERENCES users(id),
+    is_active {int} NOT NULL DEFAULT 1,
+    created_at {timestamp} NOT NULL DEFAULT {now}
 );
 """
 
+# Columns added after the initial release, applied to databases created earlier.
+_MIGRATIONS: dict[str, dict[str, str]] = {
+    "users": {
+        "is_active": "{int} NOT NULL DEFAULT 1",
+        "email": "{text}",
+        "organisation_name": "{text}",
+    },
+    "schemes": {
+        "pending_update": "{text}",
+        "pending_update_by": "{int} REFERENCES users(id)",
+        "pending_update_at": "{timestamp}",
+        "scoring_pattern": "{text}",
+    },
+    "submissions": {
+        "document_manifest": "{text} NOT NULL DEFAULT '[]'",
+        "timeline_stage": "{text} NOT NULL DEFAULT 'ingesting'",
+        "assigned_admin_id": "{int} REFERENCES users(id)",
+        "plagiarism_result": "{text}",
+        "validation_feedback": "{text}",
+        "reevaluation_request": "{text}",
+        "reevaluation_requested_at": "{timestamp}",
+        "raw_files": "{text}",
+        "pasted_text": "{text}",
+    },
+}
+
 
 def init_db() -> None:
-    conn = get_connection()
-    try:
-        conn.executescript(_SCHEMA)
-        user_columns = {row[1] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
-        if "is_active" not in user_columns:
-            conn.execute("ALTER TABLE users ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1")
-        if "email" not in user_columns:
-            conn.execute("ALTER TABLE users ADD COLUMN email TEXT")
-        if "organisation_name" not in user_columns:
-            conn.execute("ALTER TABLE users ADD COLUMN organisation_name TEXT")
-        columns = {row[1] for row in conn.execute("PRAGMA table_info(submissions)").fetchall()}
-        if "document_manifest" not in columns:
-            conn.execute("ALTER TABLE submissions ADD COLUMN document_manifest TEXT NOT NULL DEFAULT '[]'")
-        if "timeline_stage" not in columns:
-            conn.execute("ALTER TABLE submissions ADD COLUMN timeline_stage TEXT NOT NULL DEFAULT 'ingesting'")
-        if "assigned_admin_id" not in columns:
-            conn.execute("ALTER TABLE submissions ADD COLUMN assigned_admin_id INTEGER REFERENCES users(id)")
-        if "plagiarism_result" not in columns:
-            conn.execute("ALTER TABLE submissions ADD COLUMN plagiarism_result TEXT")
-        if "validation_feedback" not in columns:
-            conn.execute("ALTER TABLE submissions ADD COLUMN validation_feedback TEXT")
-        if "reevaluation_request" not in columns:
-            conn.execute("ALTER TABLE submissions ADD COLUMN reevaluation_request TEXT")
-        if "reevaluation_requested_at" not in columns:
-            conn.execute("ALTER TABLE submissions ADD COLUMN reevaluation_requested_at TEXT")
-        if "raw_files" not in columns:
-            conn.execute("ALTER TABLE submissions ADD COLUMN raw_files TEXT")
-        if "pasted_text" not in columns:
-            conn.execute("ALTER TABLE submissions ADD COLUMN pasted_text TEXT")
-        scheme_columns = {row[1] for row in conn.execute("PRAGMA table_info(schemes)").fetchall()}
-        if "pending_update" not in scheme_columns:
-            conn.execute("ALTER TABLE schemes ADD COLUMN pending_update TEXT")
-        if "pending_update_by" not in scheme_columns:
-            conn.execute("ALTER TABLE schemes ADD COLUMN pending_update_by INTEGER REFERENCES users(id)")
-        if "pending_update_at" not in scheme_columns:
-            conn.execute("ALTER TABLE schemes ADD COLUMN pending_update_at TEXT")
-        if "scoring_pattern" not in scheme_columns:
-            conn.execute("ALTER TABLE schemes ADD COLUMN scoring_pattern TEXT")
-        conn.commit()
-    finally:
-        conn.close()
+    adapter = get_adapter()
+    database = get_database()
+    database.execute_script(adapter.render_ddl(_SCHEMA_TEMPLATE))
+
+    with database.transaction() as tx:
+        for table, columns in _MIGRATIONS.items():
+            existing = adapter.existing_columns(tx.connection, table)
+            for column, definition in columns.items():
+                if column not in existing:
+                    tx.execute(f"ALTER TABLE {table} ADD COLUMN {column} {adapter.render_ddl(definition)}")

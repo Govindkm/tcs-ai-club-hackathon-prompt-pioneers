@@ -20,7 +20,7 @@ import random
 import re
 import shutil
 from dataclasses import dataclass, field
-from functools import lru_cache
+from functools import cache
 from pathlib import Path
 
 import pymupdf
@@ -193,9 +193,11 @@ def build_model(application: dict, scheme: dict, document: dict) -> DocumentMode
             (
                 "Applicant declaration",
                 [
-                    f"{applicant['name']} confirms that the information supplied in this application is "
-                    f"complete and accurate to the best of its knowledge, and that the supporting evidence "
-                    f"listed below accompanies this form."
+                    (
+                        f"{applicant['name']} confirms that the information supplied in this application "
+                        f"is complete and accurate to the best of its knowledge, and that the supporting "
+                        f"evidence listed below accompanies this form."
+                    ),
                 ],
             )
         )
@@ -208,8 +210,10 @@ def build_model(application: dict, scheme: dict, document: dict) -> DocumentMode
             (
                 "Certificate particulars",
                 [
-                    f"Produced by {applicant['name']} as evidence of its status as a "
-                    f"{applicant['type'].replace('_', ' ')} operating in {applicant['district']}."
+                    (
+                        f"Produced by {applicant['name']} as evidence of its status as a "
+                        f"{applicant['type'].replace('_', ' ')} operating in {applicant['district']}."
+                    ),
                 ],
             )
         )
@@ -223,8 +227,10 @@ def build_model(application: dict, scheme: dict, document: dict) -> DocumentMode
             (
                 "Basis of authority",
                 [
-                    f"Issued in respect of the proposed activity of {applicant['name']} in "
-                    f"{applicant['district']} under {scheme['name']}."
+                    (
+                        f"Issued in respect of the proposed activity of {applicant['name']} in "
+                        f"{applicant['district']} under {scheme['name']}."
+                    ),
                 ],
             )
         )
@@ -438,7 +444,7 @@ def write_pptx(model: DocumentModel, path: Path, quality: str, rng: random.Rando
 # --------------------------------------------------------------------------- images
 
 
-@lru_cache(maxsize=None)
+@cache
 def _font(size: int, bold: bool = False):
     candidates = (
         ("arialbd.ttf", "segoeuib.ttf", "DejaVuSans-Bold.ttf")

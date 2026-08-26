@@ -16,3 +16,4 @@ data/app.db
 data/chroma/
 data/uploads/
 .vscode/
+*.log
