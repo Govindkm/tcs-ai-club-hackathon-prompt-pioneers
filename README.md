@@ -74,7 +74,7 @@ The POC must demonstrate every normalized capability from the eight relevant pro
 - [Architecture overview](docs/architecture.md) - detailed component boundaries, data flows, persistence, security, and Mermaid diagrams.
 - [UI, API, and backend flows](docs/ui-api-flows.md) - applicant submission and admin review interaction diagrams with the routes and guards behind each step.
 - [Developer guide](docs/developer-guide.md) - local setup, day-to-day workflows, testing, configuration, and extension patterns.
-- [Application intelligence platform presentation](docs/prompt_pioneers_application_intelligence_platform.pptx) - 12-slide POC overview for the reviewer/demo walkthrough.
+- [Application intelligence platform presentation](docs/prompt_pioneers_application_intelligence_platform.pptx) - 10-slide POC overview with technology stack, architecture flow, and reviewer/demo walkthrough.
 
 The README is the quick orientation. The documents above are the detailed guides for maintaining and extending the current implementation.
 
