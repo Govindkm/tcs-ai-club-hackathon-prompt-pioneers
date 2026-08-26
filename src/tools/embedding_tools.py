@@ -9,6 +9,26 @@ from src.vectorstore.chroma_store import ChromaStore
 
 _STORE = ChromaStore()
 
+_MAX_REPORTED_FAILURES = 5
+_MAX_REASON_CHARS = 200
+
+
+def _unusable_summary(documents: list[dict]) -> str:
+    """Explain why a bundle had nothing to index - usually a failed extraction/OCR."""
+    reasons = []
+    for document in documents:
+        title = str(document.get("title") or document.get("source_path") or "document")
+        if document.get("status") == "failed":
+            reason = str(document.get("error") or "extraction failed")[:_MAX_REASON_CHARS]
+            reasons.append(f"{title}: {reason}")
+        elif not str(document.get("content", "")).strip():
+            reasons.append(f"{title}: empty after extraction")
+    if not reasons:
+        return "The bundle contained no document content."
+    listed = "; ".join(reasons[:_MAX_REPORTED_FAILURES])
+    remaining = len(reasons) - _MAX_REPORTED_FAILURES
+    return f"{listed}{f' (+{remaining} more)' if remaining > 0 else ''}"
+
 
 @tool
 def index_document_bundle(
@@ -32,8 +52,12 @@ def index_document_bundle(
     if any(not required.issubset(document) for document in documents):
         raise ValueError("Every document must contain title, extension, metadata, and content.")
     result = _STORE.replace_documents(documents, scheme_id, scheme_title, submission_id)
-    if result["indexed_chunk_count"] == 0:
-        raise ValueError("No usable document content was available for indexing.")
+    # A re-ingestion of unchanged documents legitimately writes zero chunks, so failure
+    # is judged on usable documents instead of on newly embedded chunks.
+    if result["indexed_document_count"] == 0:
+        raise ValueError(
+            f"No usable document content was available for indexing. {_unusable_summary(documents)}"
+        )
     return {"scheme_id": scheme_id, "submission_id": submission_id, **result}
 
 

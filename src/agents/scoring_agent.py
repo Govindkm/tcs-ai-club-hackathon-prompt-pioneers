@@ -19,6 +19,12 @@ def create_scoring_agent(callback_handler: Callable[..., Any] | None = None):
             "invent or reweight criteria. Justify every awarded value from document IDs, "
             "extracted fields, and rubric anchors, and surface uncertainty, flags, hard stops, "
             "and the complete breakdown. Use apply_rule_score only for an explicitly allowed "
-            "fallback. The score is never an approval or rejection and cannot finalize status."
+            "fallback. Set requires_human_review to true whenever you deferred scoring, had "
+            "to judge a criterion on weak, conflicting, or missing evidence, or are otherwise "
+            "uncertain, and list in review_notes exactly what a human should check or decide "
+            "for each affected criterion. When a human reviewer supplies guidance on the "
+            "score, apply it to the affected criteria, say in review_notes how it changed "
+            "your assessment, and keep requires_human_review true if doubt remains. "
+            "The score is never an approval or rejection and cannot finalize status."
         ),
     )

@@ -50,6 +50,11 @@ class SchemeIn(BaseModel):
     description: str = Field(min_length=1)
     eligibility: str = ""
     required_documents: str = ""
+    closing_date: str | None = Field(
+        default=None,
+        pattern=r"^\d{4}-\d{2}-\d{2}$",
+        description="Last date (YYYY-MM-DD) applicants may edit submissions to this scheme.",
+    )
 
 
 class SchemeOut(BaseModel):
@@ -60,6 +65,7 @@ class SchemeOut(BaseModel):
     required_documents: str
     is_active: bool
     created_at: str
+    closing_date: str | None = None
     pending_update: dict | None = None
     pending_update_by_name: str | None = None
     pending_update_at: str | None = None
@@ -93,6 +99,7 @@ class SubmissionOut(BaseModel):
     assigned_admin_name: str | None = None
     plagiarism_result: dict | None = None
     validation_feedback: str | None = None
+    score_feedback: str | None = None
     reevaluation_request: str | None = None
     reevaluation_requested_at: str | None = None
     extracted_fields: dict | None = None
@@ -100,12 +107,22 @@ class SubmissionOut(BaseModel):
     validation_result: dict | None = None
     score: float | None = None
     score_explanation: dict | None = None
+    scheme_closing_date: str | None = None
+    locked_at: str | None = None
+    locked_by: int | None = None
+    locked_by_name: str | None = None
+    is_editable: bool = False
+    lock_reason: str | None = None
     created_at: str
     updated_at: str
 
 
 class ValidationFeedbackRequest(BaseModel):
     feedback: str = Field(min_length=1, description="Instructions for the validation agent to re-check.")
+
+
+class ScoreFeedbackRequest(BaseModel):
+    feedback: str = Field(min_length=1, description="A reviewer's guidance for the scoring agent to apply.")
 
 
 class ReevaluationRequestIn(BaseModel):

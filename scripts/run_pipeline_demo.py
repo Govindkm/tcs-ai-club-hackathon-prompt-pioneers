@@ -18,6 +18,14 @@ Submission date: 15/03/2026.
 Project description: Installation of solar micro-grids in three villages.
 """
 
+SAMPLE_SCHEME = {
+    "name": "Green Energy Grant",
+    "description": "Capital grants for community-owned solar micro-grids in rural settlements.",
+    "eligibility": "Registered cooperative or not-for-profit; project site is rural; no prior grant default",
+    "required_documents": "application_form; project_proposal; itemised_budget; registration_certificate",
+}
+
+
 def _print_event(stage: str, event_type: str, content: str) -> None:
     icon = {"stage_start": "▶", "reasoning": "🧠", "text": "💬", "tool_call": "🔧", "stage_complete": "✅"}.get(
         event_type, "•"
@@ -29,7 +37,8 @@ if __name__ == "__main__":
     pipeline = create_orchestrator(event_sink=_print_event)
     result = pipeline.process(
         document_text=SAMPLE_DOCUMENT,
-        required_fields=["amounts_found", "dates_found"],
+        scheme=SAMPLE_SCHEME,
+        organisation_name="Sunrise Cooperative",
     )
     for stage, output in result.items():
         print(f"\n--- {stage.upper()} ---")

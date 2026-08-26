@@ -26,9 +26,15 @@ from src.agents.results import (
     ValidationResult,
 )
 from src.db import repository as db
+from src.tools import verification_tools
 from src.tools.document_tools import extract_fields, summarize_document
 from src.tools.scoring_tools import apply_rule_score
-from src.tools.validation_tools import check_completeness, flag_authenticity_risks
+from src.tools.validation_tools import (
+    check_scheme_requirements,
+    flag_authenticity_risks,
+    split_requirements,
+)
+from src.tools.verification_tools import verify_organisation_online
 
 
 class _FakePipeline:
@@ -63,18 +69,23 @@ class _FakePipeline:
     def run_validation(
         self,
         extracted_fields,
-        required_fields,
+        scheme,
+        submitted_documents=None,
         admin_feedback="",
         plagiarism_summary=None,
         organisation_name=None,
         scoring_pattern=None,
     ) -> ValidationResult:
-        self._event_sink("validation", "stage_start", "Validating completeness.")
-        completeness = check_completeness(extracted_fields, required_fields)
-        risks = flag_authenticity_risks(extracted_fields)
+        self._event_sink("validation", "stage_start", "Validating against scheme requirements.")
+        requirements = check_scheme_requirements(
+            split_requirements(scheme.get("required_documents", "")), submitted_documents or []
+        )
+        risks = flag_authenticity_risks(extracted_fields, submitted_documents)
         validation = ValidationResult(
-            is_complete=completeness["is_complete"],
-            missing_fields=completeness["missing_fields"],
+            is_complete=requirements["is_complete"],
+            missing_documents=requirements["missing_documents"],
+            unusable_documents=requirements["unusable_documents"],
+            organisation_check=verify_organisation_online(organisation_name or ""),
             risk_flags=risks["risk_flags"],
             requires_human_review=risks["requires_human_review"],
         )
@@ -87,7 +98,12 @@ class _FakePipeline:
         self._event_sink("scoring", "stage_start", "Computing score.")
         scoring = apply_rule_score(validation_result)
         self._event_sink("scoring", "stage_complete", str(scoring))
-        return ScoringResult(score=scoring["score"], explanation=scoring["explanation"])
+        return ScoringResult(
+            score=scoring["score"],
+            explanation=scoring["explanation"],
+            requires_human_review=not admin_feedback,
+            review_notes=["Check the completeness weighting."] if not admin_feedback else [],
+        )
 
 
 @pytest.fixture(autouse=True)
@@ -96,6 +112,9 @@ def isolated_env(tmp_path, monkeypatch):
     monkeypatch.setenv("UPLOAD_STORAGE_DIR", str(tmp_path / "uploads"))
     monkeypatch.setenv("JWT_SECRET_KEY", "test-secret-key-for-unit-tests-only-0123456789")
     monkeypatch.setenv("STRANDS_TRACE_CONSOLE", "false")
+    # Never let the organisation check reach the real Exa API from a test run.
+    monkeypatch.delenv("EXA_API_KEY", raising=False)
+    monkeypatch.setattr(verification_tools, "_client", None)
     monkeypatch.setattr(applications_module, "create_orchestrator", lambda event_sink=None: _FakePipeline(event_sink))
     monkeypatch.setattr(
         schemes_module,
@@ -145,13 +164,21 @@ def _admin_headers(client: TestClient, username: str = "admin1", password: str =
     return {"Authorization": f"Bearer {token['access_token']}"}
 
 
-def _create_scheme(client: TestClient, admin_headers: dict) -> int:
+def _create_scheme(client: TestClient, admin_headers: dict, name: str = "Grant") -> int:
     resp = client.post(
         "/api/v1/schemes",
-        json={"name": "Grant", "description": "desc", "eligibility": "elig", "required_documents": "docs"},
+        json={"name": name, "description": "desc", "eligibility": "elig", "required_documents": "docs"},
         headers=admin_headers,
     )
     return resp.json()["id"]
+
+
+def _edit(client: TestClient, headers: dict, application_id: int, scheme_id: int, text: str = "updated content"):
+    return client.put(
+        f"/api/v1/applications/{application_id}",
+        data={"scheme_id": scheme_id, "notes": "edited", "pasted_text": text},
+        headers=headers,
+    )
 
 
 def _submit(client: TestClient, headers: dict, scheme_id: int, text: str = "Rs. 1,000 on 01/01/2025") -> dict:
@@ -708,3 +735,219 @@ def test_owner_and_admin_can_preview_submitted_files_but_others_cannot(client):
 
     missing = client.get(f"/api/v1/applications/{submission_id}/files/5", headers=dave_headers)
     assert missing.status_code == 404
+
+
+def test_applicant_can_edit_scheme_and_documents_until_an_admin_assigns(client):
+    admin_headers = _admin_headers(client)
+    first_scheme = _create_scheme(client, admin_headers, "Grant A")
+    second_scheme = _create_scheme(client, admin_headers, "Grant B")
+    dave = _register_and_login(client, "dave14", "Sup3rSecret!")
+    dave_headers = {"Authorization": f"Bearer {dave['access_token']}"}
+
+    submission = _submit(client, dave_headers, first_scheme, "Rs. 1,000 on 01/01/2025")
+    assert submission["is_editable"] is True
+    assert submission["lock_reason"] is None
+
+    edited = _edit(client, dave_headers, submission["id"], second_scheme, "Rs. 9,000 on 02/02/2026")
+    assert edited.status_code == 200
+    assert edited.json()["scheme_id"] == second_scheme
+    assert "Rs. 9,000" in edited.json()["document_text"]
+    assert edited.json()["applicant_notes"] == "edited"
+
+    # An admin claiming the case ends the applicant's edit window.
+    assert client.post(f"/api/v1/applications/{submission['id']}/assign", headers=admin_headers).status_code == 200
+    blocked = _edit(client, dave_headers, submission["id"], first_scheme)
+    assert blocked.status_code == 409
+    assert "locked" in blocked.json()["detail"].lower()
+
+
+def test_only_the_owning_applicant_can_edit_a_submission(client):
+    admin_headers = _admin_headers(client)
+    scheme_id = _create_scheme(client, admin_headers)
+    dave = _register_and_login(client, "dave15", "Sup3rSecret!")
+    dave_headers = {"Authorization": f"Bearer {dave['access_token']}"}
+    eve = _register_and_login(client, "eve15", "Sup3rSecret!")
+    eve_headers = {"Authorization": f"Bearer {eve['access_token']}"}
+    submission = _submit(client, dave_headers, scheme_id)
+
+    assert _edit(client, eve_headers, submission["id"], scheme_id).status_code == 403
+    assert _edit(client, admin_headers, submission["id"], scheme_id).status_code == 403
+
+
+def test_edit_requires_documents_or_pasted_text(client):
+    admin_headers = _admin_headers(client)
+    scheme_id = _create_scheme(client, admin_headers)
+    dave = _register_and_login(client, "dave16", "Sup3rSecret!")
+    dave_headers = {"Authorization": f"Bearer {dave['access_token']}"}
+    submission = _submit(client, dave_headers, scheme_id)
+
+    assert _edit(client, dave_headers, submission["id"], scheme_id, text="   ").status_code == 400
+
+
+def test_admin_lock_blocks_edits_until_unlocked(client):
+    admin_headers = _admin_headers(client)
+    scheme_id = _create_scheme(client, admin_headers)
+    dave = _register_and_login(client, "dave17", "Sup3rSecret!")
+    dave_headers = {"Authorization": f"Bearer {dave['access_token']}"}
+    submission = _submit(client, dave_headers, scheme_id)
+
+    locked = client.post(f"/api/v1/applications/{submission['id']}/lock", headers=admin_headers)
+    assert locked.status_code == 200
+    assert locked.json()["is_editable"] is False
+    assert locked.json()["locked_by_name"] == "Admin One"
+    assert _edit(client, dave_headers, submission["id"], scheme_id).status_code == 409
+
+    unlocked = client.post(f"/api/v1/applications/{submission['id']}/unlock", headers=admin_headers)
+    assert unlocked.status_code == 200
+    assert unlocked.json()["is_editable"] is True
+    assert _edit(client, dave_headers, submission["id"], scheme_id).status_code == 200
+
+
+def test_applicants_cannot_lock_submissions(client):
+    admin_headers = _admin_headers(client)
+    scheme_id = _create_scheme(client, admin_headers)
+    dave = _register_and_login(client, "dave18", "Sup3rSecret!")
+    dave_headers = {"Authorization": f"Bearer {dave['access_token']}"}
+    submission = _submit(client, dave_headers, scheme_id)
+
+    assert client.post(f"/api/v1/applications/{submission['id']}/lock", headers=dave_headers).status_code == 403
+    assert client.post(f"/api/v1/applications/{submission['id']}/unlock", headers=dave_headers).status_code == 403
+
+
+def test_scheme_closing_date_locks_submissions_for_editing(client):
+    admin_headers = _admin_headers(client)
+    scheme_id = _create_scheme(client, admin_headers)
+    dave = _register_and_login(client, "dave19", "Sup3rSecret!")
+    dave_headers = {"Authorization": f"Bearer {dave['access_token']}"}
+    submission = _submit(client, dave_headers, scheme_id)
+
+    past = client.patch(
+        f"/api/v1/schemes/{scheme_id}/closing-date", params={"closing_date": "2020-01-01"}, headers=admin_headers
+    )
+    assert past.status_code == 200
+    assert past.json()["closing_date"] == "2020-01-01"
+
+    fetched = client.get(f"/api/v1/applications/{submission['id']}", headers=dave_headers).json()
+    assert fetched["is_editable"] is False
+    assert "2020-01-01" in fetched["lock_reason"]
+    assert _edit(client, dave_headers, submission["id"], scheme_id).status_code == 409
+
+    # Clearing the date reopens editing.
+    cleared = client.patch(
+        f"/api/v1/schemes/{scheme_id}/closing-date", params={"closing_date": ""}, headers=admin_headers
+    )
+    assert cleared.status_code == 200
+    assert cleared.json()["closing_date"] is None
+    assert _edit(client, dave_headers, submission["id"], scheme_id).status_code == 200
+
+
+def test_closing_date_must_be_iso_and_is_admin_only(client):
+    admin_headers = _admin_headers(client)
+    scheme_id = _create_scheme(client, admin_headers)
+    dave = _register_and_login(client, "dave20", "Sup3rSecret!")
+    dave_headers = {"Authorization": f"Bearer {dave['access_token']}"}
+
+    bad = client.patch(
+        f"/api/v1/schemes/{scheme_id}/closing-date", params={"closing_date": "31-12-2026"}, headers=admin_headers
+    )
+    assert bad.status_code == 422
+
+    forbidden = client.patch(
+        f"/api/v1/schemes/{scheme_id}/closing-date", params={"closing_date": "2026-12-31"}, headers=dave_headers
+    )
+    assert forbidden.status_code == 403
+
+
+def test_scheme_can_be_created_with_a_closing_date(client):
+    admin_headers = _admin_headers(client)
+    created = client.post(
+        "/api/v1/schemes",
+        json={
+            "name": "Dated Grant",
+            "description": "desc",
+            "eligibility": "elig",
+            "required_documents": "docs",
+            "closing_date": "2030-06-30",
+        },
+        headers=admin_headers,
+    )
+    assert created.status_code == 201
+    assert created.json()["closing_date"] == "2030-06-30"
+
+
+def _score_ready(client, admin_headers, username: str) -> int:
+    """Drive a submission all the way to awaiting_score_approval."""
+    scheme_id = _create_scheme(client, admin_headers)
+    applicant = _register_and_login(client, username, "Sup3rSecret!")
+    applicant_headers = {"Authorization": f"Bearer {applicant['access_token']}"}
+    submission_id = _submit(client, applicant_headers, scheme_id)["id"]
+    client.post(f"/api/v1/applications/{submission_id}/assign", headers=admin_headers)
+    client.post(f"/api/v1/applications/{submission_id}/validation/complete", headers=admin_headers)
+    return submission_id
+
+
+def test_scoring_agent_can_request_human_review_of_the_score(client):
+    admin_headers = _admin_headers(client)
+    submission_id = _score_ready(client, admin_headers, "dave21")
+
+    submission = client.get(f"/api/v1/applications/{submission_id}", headers=admin_headers).json()
+    assert submission["timeline_stage"] == "awaiting_score_approval"
+    assert submission["score_explanation"]["requires_human_review"] is True
+    assert submission["score_explanation"]["review_notes"]
+
+    # The request for human review is also surfaced to admins as a notification.
+    notifications = client.get("/api/v1/notifications", headers=admin_headers).json()
+    assert any("needs human review" in n["title"] for n in notifications)
+
+
+def test_admin_guidance_re_scores_and_clears_previous_approvals(client):
+    admin1 = _admin_headers(client, "admin_score_a", "Sup3rSecret!")
+    admin2 = _admin_headers(client, "admin_score_b", "Sup3rSecret!")
+    submission_id = _score_ready(client, admin1, "dave22")
+
+    first = client.post(f"/api/v1/applications/{submission_id}/score/approve", headers=admin1)
+    assert first.status_code == 200
+    assert len(client.get(f"/api/v1/applications/{submission_id}/score/approvals", headers=admin1).json()) == 1
+
+    guided = client.post(
+        f"/api/v1/applications/{submission_id}/score/feedback",
+        json={"feedback": "Community benefit is under-scored; re-assess it against the consent letter."},
+        headers=admin2,
+    )
+    assert guided.status_code == 200
+    body = client.get(f"/api/v1/applications/{submission_id}", headers=admin1).json()
+    assert body["timeline_stage"] == "awaiting_score_approval"
+    assert body["score_feedback"].startswith("Community benefit is under-scored")
+    # The re-scored result no longer asks for human review, and stale approvals are gone.
+    assert body["score_explanation"]["requires_human_review"] is False
+    assert client.get(f"/api/v1/applications/{submission_id}/score/approvals", headers=admin1).json() == []
+
+    events = client.get(f"/api/v1/applications/{submission_id}/events", headers=admin1).json()
+    assert any("Score review guidance from" in event["content"] for event in events)
+
+
+def test_score_feedback_is_admin_only_and_stage_gated(client):
+    admin_headers = _admin_headers(client)
+    scheme_id = _create_scheme(client, admin_headers)
+    applicant = _register_and_login(client, "dave23", "Sup3rSecret!")
+    applicant_headers = {"Authorization": f"Bearer {applicant['access_token']}"}
+    submission_id = _submit(client, applicant_headers, scheme_id)["id"]
+
+    # Not scored yet.
+    too_early = client.post(
+        f"/api/v1/applications/{submission_id}/score/feedback", json={"feedback": "x"}, headers=admin_headers
+    )
+    assert too_early.status_code == 409
+
+    client.post(f"/api/v1/applications/{submission_id}/assign", headers=admin_headers)
+    client.post(f"/api/v1/applications/{submission_id}/validation/complete", headers=admin_headers)
+
+    forbidden = client.post(
+        f"/api/v1/applications/{submission_id}/score/feedback", json={"feedback": "x"}, headers=applicant_headers
+    )
+    assert forbidden.status_code == 403
+
+    empty = client.post(
+        f"/api/v1/applications/{submission_id}/score/feedback", json={"feedback": ""}, headers=admin_headers
+    )
+    assert empty.status_code == 422

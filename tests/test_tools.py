@@ -2,7 +2,12 @@
 from src.tools import verification_tools
 from src.tools.document_tools import extract_fields, summarize_document
 from src.tools.scoring_tools import apply_rule_score, apply_scheme_score
-from src.tools.validation_tools import check_completeness, flag_authenticity_risks
+from src.tools.validation_tools import (
+    check_completeness,
+    check_scheme_requirements,
+    flag_authenticity_risks,
+    split_requirements,
+)
 from src.tools.workflow_tools import get_audit_trail, record_review_decision, route_to_reviewer
 
 
@@ -25,10 +30,51 @@ def test_check_completeness_flags_missing_fields():
     assert result["missing_fields"] == ["amount"]
 
 
-def test_flag_authenticity_risks_detects_duplicates():
+def test_split_requirements_handles_free_text_lists():
+    assert split_requirements("application_form; project_proposal, itemised_budget") == [
+        "application_form",
+        "project_proposal",
+        "itemised_budget",
+    ]
+    assert split_requirements(["registration_certificate"]) == ["registration_certificate"]
+
+
+def test_check_scheme_requirements_matches_documents_to_scheme_requirements():
+    result = check_scheme_requirements(
+        ["application form", "itemised budget", "registration certificate"],
+        [
+            {"title": "D1_application_form.pdf", "status": "extracted", "content": "Application form for the grant"},
+            {"title": "D3_itemised_budget.docx", "status": "extracted", "content": "Itemised budget total INR 10"},
+        ],
+    )
+    assert result["is_complete"] is False
+    assert result["missing_documents"] == ["registration certificate"]
+    assert "application form" in result["matched_requirements"]
+
+
+def test_check_scheme_requirements_reports_unusable_documents():
+    result = check_scheme_requirements(
+        ["application form"],
+        [
+            {"title": "D1_application_form.pdf", "status": "extracted", "content": "Application form for the grant"},
+            {"title": "scan.png", "status": "failed", "content": ""},
+        ],
+    )
+    assert result["unusable_documents"] == ["scan.png"]
+    assert result["is_complete"] is False
+
+
+def test_flag_authenticity_risks_detects_duplicates_in_any_field():
     result = flag_authenticity_risks({"amounts_found": ["100", "100"]})
-    assert "duplicate_amount_values" in result["risk_flags"]
+    assert "duplicate_values_in_amounts_found" in result["risk_flags"]
     assert result["requires_human_review"] is True
+
+
+def test_flag_authenticity_risks_reports_unreadable_documents():
+    result = flag_authenticity_risks(
+        {"applicant": "Acme"}, [{"title": "scan.png", "status": "failed", "content": ""}]
+    )
+    assert "unreadable_document:scan.png" in result["risk_flags"]
 
 
 def test_verify_organisation_online_skips_without_api_key(monkeypatch):

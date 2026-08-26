@@ -23,6 +23,7 @@ import json
 import logging
 import mimetypes
 import threading
+from datetime import datetime, timezone
 from typing import Callable
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
@@ -34,6 +35,7 @@ from backend.app.schemas import (
     AnalyzeRequest,
     ReevaluationRequestIn,
     ScoreApprovalOut,
+    ScoreFeedbackRequest,
     SubmissionOut,
     ValidationFeedbackRequest,
 )
@@ -45,8 +47,6 @@ from src.ingestion.storage import load_uploaded_files, save_uploaded_files
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/applications", tags=["applications"])
-
-_REQUIRED_FIELDS = ["amounts_found", "dates_found"]
 
 # timeline_stage values - drive the color-coded submission timeline in the UI.
 STAGE_INGESTING = "ingesting"
@@ -61,8 +61,26 @@ STAGE_COMPLETED = "completed"
 _SCORE_APPROVALS_REQUIRED = 2
 
 
+def _lock_reason(submission: dict) -> str | None:
+    """Why the applicant can no longer edit this submission, or None while it stays editable."""
+    if submission.get("locked_at"):
+        return f"Locked by {submission.get('locked_by_name') or 'an admin'} on {submission['locked_at']}."
+    closing_date = submission.get("scheme_closing_date")
+    # UTC, matching the CURRENT_TIMESTAMP the database stamps rows with.
+    if closing_date and datetime.now(timezone.utc).date().isoformat() > closing_date:
+        return f"This scheme closed on {closing_date}."
+    if submission["status"] in ("approved", "rejected"):
+        return "A final decision has already been recorded."
+    if submission.get("assigned_admin_id") is not None:
+        return f"{submission.get('assigned_admin_name') or 'An admin'} has started reviewing this submission."
+    if submission["analysis_status"] == "running":
+        return "Analysis is running right now; try again once it finishes."
+    return None
+
+
 def _to_out(sub: dict) -> SubmissionOut:
-    return SubmissionOut(**sub)
+    reason = _lock_reason(sub)
+    return SubmissionOut(**{**sub, "is_editable": reason is None, "lock_reason": reason})
 
 
 def _check_ownership(submission: dict, current_user: dict) -> None:
@@ -212,14 +230,15 @@ def run_extraction_and_validation_job(submission_id: int, admin_feedback: str = 
         extraction = pipeline.run_extraction(submission["document_text"], admin_feedback)
 
         db.set_timeline_stage(submission_id, STAGE_VALIDATION_RUNNING)
-        scheme = db.get_scheme(submission["scheme_id"])
+        scheme = db.get_scheme(submission["scheme_id"]) or {}
         validation = pipeline.run_validation(
             extraction.extracted_fields,
-            _REQUIRED_FIELDS,
-            admin_feedback,
+            scheme,
+            submitted_documents=submission.get("document_manifest"),
+            admin_feedback=admin_feedback,
             plagiarism_summary=submission.get("plagiarism_result"),
             organisation_name=submission.get("applicant_organisation"),
-            scoring_pattern=scheme.get("scoring_pattern") if scheme else None,
+            scoring_pattern=scheme.get("scoring_pattern"),
         )
         db.save_extraction_and_validation(
             submission_id, extraction.extracted_fields, extraction.summary, validation.model_dump()
@@ -243,14 +262,15 @@ def run_validation_feedback_job(submission_id: int, feedback: str) -> None:
         db.set_analysis_status(submission_id, "running", stage="validation")
         submission = db.get_submission(submission_id)
         pipeline = create_orchestrator(event_sink=sink)
-        scheme = db.get_scheme(submission["scheme_id"])
+        scheme = db.get_scheme(submission["scheme_id"]) or {}
         validation = pipeline.run_validation(
             submission.get("extracted_fields") or {},
-            _REQUIRED_FIELDS,
+            scheme,
+            submitted_documents=submission.get("document_manifest"),
             admin_feedback=feedback,
             plagiarism_summary=submission.get("plagiarism_result"),
             organisation_name=submission.get("applicant_organisation"),
-            scoring_pattern=scheme.get("scoring_pattern") if scheme else None,
+            scoring_pattern=scheme.get("scoring_pattern"),
         )
         db.save_validation_result(submission_id, validation.model_dump(), feedback=feedback)
         db.set_analysis_status(submission_id, "completed", stage="validation_done")
@@ -261,8 +281,10 @@ def run_validation_feedback_job(submission_id: int, feedback: str) -> None:
         db.set_analysis_status(submission_id, "failed", error=str(exc))
 
 
-def run_scoring_job(submission_id: int) -> None:
-    """Stage 3 (admin-triggered via /validation/complete): explainable scoring."""
+def run_scoring_job(submission_id: int, admin_feedback: str = "") -> None:
+    """Stage 3 (admin-triggered via /validation/complete, or re-run via /score/feedback):
+    explainable scoring. The agent can itself ask for human review of the score, and a
+    human reviewer's guidance is fed back in on a re-run."""
     logger.info("Scoring job started for submission %s.", submission_id)
     sink = _make_sink(submission_id)
     try:
@@ -272,15 +294,31 @@ def run_scoring_job(submission_id: int) -> None:
         pipeline = create_orchestrator(event_sink=sink)
         scheme = db.get_scheme(submission["scheme_id"])
         scoring = pipeline.run_scoring(
-            submission.get("validation_result") or {}, scoring_pattern=scheme.get("scoring_pattern") if scheme else None
+            submission.get("validation_result") or {},
+            admin_feedback=admin_feedback,
+            scoring_pattern=scheme.get("scoring_pattern") if scheme else None,
         )
-        db.save_scoring_result(submission_id, scoring.score, scoring.explanation)
+        explanation = {
+            **scoring.explanation,
+            "requires_human_review": scoring.requires_human_review,
+            "review_notes": scoring.review_notes,
+        }
+        db.save_scoring_result(submission_id, scoring.score, explanation, feedback=admin_feedback or None)
         db.set_analysis_status(submission_id, "completed", stage="scoring_done")
         db.set_timeline_stage(submission_id, STAGE_AWAITING_SCORE_APPROVAL)
-        _notify_admins(
-            f"Score ready for submission #{submission_id}",
-            f"Advisory score {scoring.score} is ready for review and approval.",
-        )
+        if scoring.requires_human_review:
+            reasons = "; ".join(scoring.review_notes) or "The agent is not confident in this score."
+            db.append_analysis_event(submission_id, "scoring", "text", f"Human review requested: {reasons}")
+            _notify_admins(
+                f"Score for submission #{submission_id} needs human review",
+                f"Advisory score {scoring.score} was flagged by the scoring agent for human review: "
+                f"{reasons} Review it and either approve it or send guidance to re-score.",
+            )
+        else:
+            _notify_admins(
+                f"Score ready for submission #{submission_id}",
+                f"Advisory score {scoring.score} is ready for review and approval.",
+            )
         logger.info("Scoring completed for submission %s (score=%s).", submission_id, scoring.score)
     except Exception as exc:  # noqa: BLE001
         logger.exception("Scoring failed for submission %s.", submission_id)
@@ -307,6 +345,61 @@ async def submit_application(
     submission_id = db.create_submission(current_user["id"], scheme_id, notes, pasted_text.strip())
     _start_background_job(run_ingestion_job, submission_id, file_payloads, pasted_text)
     return _to_out(db.get_submission(submission_id))
+
+
+@router.put("/{application_id}", response_model=SubmissionOut)
+async def update_application(
+    application_id: int,
+    scheme_id: int = Form(...),
+    notes: str = Form(""),
+    pasted_text: str = Form(""),
+    files: list[UploadFile] = File(default_factory=list),
+    current_user: dict = Depends(get_current_user),
+) -> SubmissionOut:
+    """The submitting applicant replaces the scheme and/or documents while the case is
+    still editable (see _lock_reason); the supplied content fully replaces the previous
+    documents and the review timeline restarts from ingestion."""
+    submission = db.get_submission(application_id)
+    if submission is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Application not found")
+    if current_user["role"] != "applicant" or submission["user_id"] != current_user["id"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Only the submitting applicant can edit this."
+        )
+    reason = _lock_reason(submission)
+    if reason:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"This submission is locked. {reason}")
+    if not files and not pasted_text.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Please upload at least one document or paste some content."
+        )
+    if db.get_scheme(scheme_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Scheme not found")
+
+    file_payloads = [(upload.filename or "upload", await upload.read()) for upload in files]
+    db.apply_submission_edit(application_id, scheme_id, notes)
+    _start_background_job(run_ingestion_job, application_id, file_payloads, pasted_text)
+    return _to_out(db.get_submission(application_id))
+
+
+@router.post("/{application_id}/lock", response_model=SubmissionOut)
+def lock_application(application_id: int, current_user: dict = Depends(require_role("admin"))) -> SubmissionOut:
+    """Admin closes a submission to further applicant edits (e.g. once its scheme's end date passes)."""
+    submission = db.get_submission(application_id)
+    if submission is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Application not found")
+    db.set_submission_lock(application_id, current_user["id"])
+    return _to_out(db.get_submission(application_id))
+
+
+@router.post("/{application_id}/unlock", response_model=SubmissionOut)
+def unlock_application(application_id: int, current_user: dict = Depends(require_role("admin"))) -> SubmissionOut:
+    """Admin reopens a manually locked submission; a passed scheme closing date still locks it."""
+    submission = db.get_submission(application_id)
+    if submission is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Application not found")
+    db.set_submission_lock(application_id, None)
+    return _to_out(db.get_submission(application_id))
 
 
 @router.post("/{application_id}/assign", response_model=SubmissionOut)
@@ -378,6 +471,29 @@ def list_score_approvals(application_id: int, current_user: dict = Depends(get_c
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Application not found")
     _check_ownership(submission, current_user)
     return [ScoreApprovalOut(**a) for a in db.list_score_approvals(application_id)]
+
+
+@router.post("/{application_id}/score/feedback", response_model=SubmissionOut)
+def submit_score_feedback(
+    application_id: int, payload: ScoreFeedbackRequest, current_user: dict = Depends(require_role("admin"))
+) -> SubmissionOut:
+    """Any admin reviewing the score can send guidance instead of approving it; scoring
+    re-runs with that guidance and previously collected approvals are discarded, since
+    they applied to the score being replaced."""
+    submission = db.get_submission(application_id)
+    if submission is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Application not found")
+    if submission["timeline_stage"] != STAGE_AWAITING_SCORE_APPROVAL:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Scoring is not awaiting admin review.")
+    db.clear_score_approvals(application_id)
+    db.append_analysis_event(
+        application_id,
+        "scoring",
+        "text",
+        f"Score review guidance from {current_user.get('full_name') or current_user['username']}: {payload.feedback}",
+    )
+    _start_background_job(run_scoring_job, application_id, payload.feedback)
+    return _to_out(db.get_submission(application_id))
 
 
 @router.post("/{application_id}/restart", response_model=SubmissionOut)

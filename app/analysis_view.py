@@ -32,11 +32,29 @@ def _render_validation(validation: dict) -> None:
 
     missing_fields = validation.get("missing_fields") or []
     risk_flags = validation.get("risk_flags") or []
+    for label, key in (
+        ("Missing required documents", "missing_documents"),
+        ("Unusable documents", "unusable_documents"),
+        ("Unmet eligibility criteria", "unmet_eligibility"),
+        ("Contradictions", "contradictions"),
+    ):
+        values = validation.get(key) or []
+        if values:
+            st.markdown(f"**{label}**")
+            for value in values:
+                st.warning(str(value), icon=":material/rule:")
     if missing_fields:
         st.markdown("**Missing fields**")
         st.write(", ".join(str(field) for field in missing_fields))
+    organisation_check = validation.get("organisation_check") or {}
+    if organisation_check:
+        with st.expander("🏢 Applicant organisation verification"):
+            st.json(organisation_check)
     if risk_flags:
         st.markdown("**Risk flags**")
+        risk_level = validation.get("risk_level")
+        if risk_level:
+            st.caption(f"Overall risk level: **{risk_level}**")
         for flag in risk_flags:
             st.warning(str(flag), icon=":material/flag:")
 
@@ -48,6 +66,10 @@ def _render_score(score: float, explanation: dict | None) -> None:
         st.metric("Score", f"{score:g}")
     with note_col:
         st.caption("AI-generated guidance for human review, not a final decision.")
+    if (explanation or {}).get("requires_human_review"):
+        st.warning("The scoring agent asked for human review of this score.", icon=":material/visibility:")
+        for note in explanation.get("review_notes") or []:
+            st.caption(f"• {note}")
 
     explanation = explanation or {}
     criteria = explanation.get("criteria") or []

@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS schemes (
     is_active {int} NOT NULL DEFAULT 1,
     created_by {int} REFERENCES users(id),
     created_at {timestamp} NOT NULL DEFAULT {now},
+    closing_date {text},
     pending_update {text},
     pending_update_by {int} REFERENCES users(id),
     pending_update_at {timestamp},
@@ -65,10 +66,13 @@ CREATE TABLE IF NOT EXISTS submissions (
     assigned_admin_id {int} REFERENCES users(id),
     plagiarism_result {text},
     validation_feedback {text},
+    score_feedback {text},
     reevaluation_request {text},
     reevaluation_requested_at {timestamp},
     raw_files {text},
     pasted_text {text},
+    locked_at {timestamp},
+    locked_by {int} REFERENCES users(id),
     created_at {timestamp} NOT NULL DEFAULT {now},
     updated_at {timestamp} NOT NULL DEFAULT {now}
 );
@@ -122,6 +126,7 @@ _MIGRATIONS: dict[str, dict[str, str]] = {
         "pending_update_by": "{int} REFERENCES users(id)",
         "pending_update_at": "{timestamp}",
         "scoring_pattern": "{text}",
+        "closing_date": "{text}",
     },
     "submissions": {
         "document_manifest": "{text} NOT NULL DEFAULT '[]'",
@@ -129,10 +134,13 @@ _MIGRATIONS: dict[str, dict[str, str]] = {
         "assigned_admin_id": "{int} REFERENCES users(id)",
         "plagiarism_result": "{text}",
         "validation_feedback": "{text}",
+        "score_feedback": "{text}",
         "reevaluation_request": "{text}",
         "reevaluation_requested_at": "{timestamp}",
         "raw_files": "{text}",
         "pasted_text": "{text}",
+        "locked_at": "{timestamp}",
+        "locked_by": "{int} REFERENCES users(id)",
     },
 }
 

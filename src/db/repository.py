@@ -107,12 +107,17 @@ def reset_password(user_id: int, new_password: str) -> None:
 # ---------------------------------------------------------------------------
 
 def create_scheme(
-    name: str, description: str, eligibility: str, required_documents: str, created_by: int | None
+    name: str,
+    description: str,
+    eligibility: str,
+    required_documents: str,
+    created_by: int | None,
+    closing_date: str | None = None,
 ) -> int:
     return get_database().insert(
-        "INSERT INTO schemes (name, description, eligibility, required_documents, created_by) "
-        "VALUES (?, ?, ?, ?, ?)",
-        (name, description, eligibility, required_documents, created_by),
+        "INSERT INTO schemes (name, description, eligibility, required_documents, created_by, closing_date) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (name, description, eligibility, required_documents, created_by, closing_date),
     )
 
 
@@ -138,6 +143,13 @@ def set_scheme_active(scheme_id: int, is_active: bool) -> None:
 def set_scheme_scoring_pattern(scheme_id: int, scoring_pattern: dict) -> None:
     get_database().execute(
         "UPDATE schemes SET scoring_pattern = ? WHERE id = ?", (json.dumps(scoring_pattern), scheme_id)
+    )
+
+
+def set_scheme_closing_date(scheme_id: int, closing_date: str | None) -> None:
+    """Set (or clear with None) the date after which submissions to this scheme lock."""
+    get_database().execute(
+        "UPDATE schemes SET closing_date = ? WHERE id = ?", (closing_date, scheme_id)
     )
 
 
@@ -216,6 +228,35 @@ def create_submission(user_id: int, scheme_id: int, applicant_notes: str, docume
     )
 
 
+def apply_submission_edit(submission_id: int, scheme_id: int, applicant_notes: str) -> None:
+    """Re-point an applicant's submission at (possibly) another scheme and clear every
+    analysis result, so re-ingestion starts the review timeline from scratch."""
+    get_database().execute(
+        "UPDATE submissions SET scheme_id = ?, applicant_notes = ?, document_text = '', "
+        "document_manifest = '[]', extracted_fields = NULL, summary = NULL, validation_result = NULL, "
+        "validation_feedback = NULL, score = NULL, score_explanation = NULL, plagiarism_result = NULL, "
+        "analysis_error = NULL, analysis_stage = NULL, analysis_status = 'queued', "
+        "timeline_stage = 'ingesting', status = 'submitted', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        (scheme_id, applicant_notes, submission_id),
+    )
+
+
+def set_submission_lock(submission_id: int, admin_id: int | None) -> None:
+    """Lock the submission against applicant edits, or unlock it with admin_id=None."""
+    if admin_id is None:
+        get_database().execute(
+            "UPDATE submissions SET locked_at = NULL, locked_by = NULL, "
+            "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (submission_id,),
+        )
+        return
+    get_database().execute(
+        "UPDATE submissions SET locked_at = CURRENT_TIMESTAMP, locked_by = ?, "
+        "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        (admin_id, submission_id),
+    )
+
+
 def update_submission_documents(submission_id: int, document_text: str, document_manifest: list[dict]) -> None:
     """Persist both legacy combined text and the structured extracted-document manifest."""
     get_database().execute(
@@ -286,12 +327,13 @@ def list_analysis_events(submission_id: int, after_id: int = 0) -> list[dict]:
 
 def get_submission(submission_id: int) -> dict | None:
     row = get_database().query_one(
-        "SELECT sub.*, sc.name AS scheme_name, u.full_name AS applicant_name, "
-        "u.organisation_name AS applicant_organisation, "
-        "admin.full_name AS assigned_admin_name FROM submissions sub "
+        "SELECT sub.*, sc.name AS scheme_name, sc.closing_date AS scheme_closing_date, "
+        "u.full_name AS applicant_name, u.organisation_name AS applicant_organisation, "
+        "admin.full_name AS assigned_admin_name, locker.full_name AS locked_by_name FROM submissions sub "
         "JOIN schemes sc ON sub.scheme_id = sc.id "
         "JOIN users u ON sub.user_id = u.id "
         "LEFT JOIN users admin ON sub.assigned_admin_id = admin.id "
+        "LEFT JOIN users locker ON sub.locked_by = locker.id "
         "WHERE sub.id = ?",
         (submission_id,),
     )
@@ -300,9 +342,11 @@ def get_submission(submission_id: int) -> dict | None:
 
 def list_submissions_for_user(user_id: int) -> list[dict]:
     rows = get_database().query_all(
-        "SELECT sub.*, sc.name AS scheme_name, admin.full_name AS assigned_admin_name FROM submissions sub "
+        "SELECT sub.*, sc.name AS scheme_name, sc.closing_date AS scheme_closing_date, "
+        "admin.full_name AS assigned_admin_name, locker.full_name AS locked_by_name FROM submissions sub "
         "JOIN schemes sc ON sub.scheme_id = sc.id "
         "LEFT JOIN users admin ON sub.assigned_admin_id = admin.id "
+        "LEFT JOIN users locker ON sub.locked_by = locker.id "
         "WHERE sub.user_id = ? ORDER BY sub.created_at DESC",
         (user_id,),
     )
@@ -311,12 +355,13 @@ def list_submissions_for_user(user_id: int) -> list[dict]:
 
 def list_all_submissions(status: str | None = None) -> list[dict]:
     query = (
-        "SELECT sub.*, sc.name AS scheme_name, u.full_name AS applicant_name, "
-        "u.organisation_name AS applicant_organisation, "
-        "admin.full_name AS assigned_admin_name FROM submissions sub "
+        "SELECT sub.*, sc.name AS scheme_name, sc.closing_date AS scheme_closing_date, "
+        "u.full_name AS applicant_name, u.organisation_name AS applicant_organisation, "
+        "admin.full_name AS assigned_admin_name, locker.full_name AS locked_by_name FROM submissions sub "
         "JOIN schemes sc ON sub.scheme_id = sc.id "
         "JOIN users u ON sub.user_id = u.id "
-        "LEFT JOIN users admin ON sub.assigned_admin_id = admin.id"
+        "LEFT JOIN users admin ON sub.assigned_admin_id = admin.id "
+        "LEFT JOIN users locker ON sub.locked_by = locker.id"
     )
     params: tuple = ()
     if status:
@@ -373,11 +418,14 @@ def save_validation_result(submission_id: int, validation_result: dict, feedback
     )
 
 
-def save_scoring_result(submission_id: int, score: float, score_explanation: dict) -> None:
+def save_scoring_result(
+    submission_id: int, score: float, score_explanation: dict, feedback: str | None = None
+) -> None:
     get_database().execute(
-        "UPDATE submissions SET score = ?, score_explanation = ?, status = 'under_review', "
+        "UPDATE submissions SET score = ?, score_explanation = ?, "
+        "score_feedback = COALESCE(?, score_feedback), status = 'under_review', "
         "updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-        (score, json.dumps(score_explanation), submission_id),
+        (score, json.dumps(score_explanation), feedback, submission_id),
     )
 
 
@@ -414,6 +462,11 @@ def list_score_approvals(submission_id: int) -> list[dict]:
         "JOIN users u ON sa.admin_id = u.id WHERE sa.submission_id = ? ORDER BY sa.created_at ASC",
         (submission_id,),
     )
+
+
+def clear_score_approvals(submission_id: int) -> None:
+    """Drop approvals of a score that is about to be recomputed - they applied to the old one."""
+    get_database().execute("DELETE FROM score_approvals WHERE submission_id = ?", (submission_id,))
 
 
 # ---------------------------------------------------------------------------

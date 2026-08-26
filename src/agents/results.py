@@ -17,15 +17,40 @@ class ExtractionResult(BaseModel):
 
 
 class ValidationResult(BaseModel):
-    is_complete: bool = Field(description="Whether all required fields were present.")
-    missing_fields: list[str] = Field(default_factory=list)
+    is_complete: bool = Field(description="Whether every document/criterion the scheme requires is present and usable.")
+    missing_documents: list[str] = Field(
+        default_factory=list, description="Scheme-required documents that were not supplied."
+    )
+    unusable_documents: list[str] = Field(
+        default_factory=list, description="Supplied documents that are illegible, unsigned, untraceable, or off-topic."
+    )
+    unmet_eligibility: list[str] = Field(
+        default_factory=list, description="Scheme eligibility criteria the evidence does not establish."
+    )
+    missing_fields: list[str] = Field(
+        default_factory=list, description="Data the scheme needs that the documents never state."
+    )
+    contradictions: list[str] = Field(
+        default_factory=list, description="Material conflicts between documents or against scheme limits."
+    )
+    organisation_check: dict[str, Any] = Field(
+        default_factory=dict, description="Result of verifying the applicant organisation online."
+    )
     risk_flags: list[str] = Field(default_factory=list, description="Authenticity/consistency risk indicators.")
+    risk_level: str = Field(default="medium", description="low, medium, or high.")
     requires_human_review: bool = Field(description="True if any risk was flagged.")
 
 
 class ScoringResult(BaseModel):
     score: float = Field(ge=0.0, description="Explainable advisory score for the human reviewer.")
     explanation: dict[str, Any] = Field(description="Breakdown of factors contributing to the score.")
+    requires_human_review: bool = Field(
+        default=False, description="True when this score should not stand without a human checking it."
+    )
+    review_notes: list[str] = Field(
+        default_factory=list,
+        description="What a human should check or decide about this score, and why.",
+    )
 
 
 class ScoringCriterion(BaseModel):

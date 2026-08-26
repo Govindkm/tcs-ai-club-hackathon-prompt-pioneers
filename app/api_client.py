@@ -85,7 +85,14 @@ class BackendClient:
     def list_schemes(self, active_only: bool = True) -> list[dict]:
         return self._request("GET", "/api/v1/schemes", params={"active_only": active_only})
 
-    def create_scheme(self, name: str, description: str, eligibility: str, required_documents: str) -> dict:
+    def create_scheme(
+        self,
+        name: str,
+        description: str,
+        eligibility: str,
+        required_documents: str,
+        closing_date: str | None = None,
+    ) -> dict:
         return self._request(
             "POST",
             "/api/v1/schemes",
@@ -94,11 +101,20 @@ class BackendClient:
                 "description": description,
                 "eligibility": eligibility,
                 "required_documents": required_documents,
+                "closing_date": closing_date,
             },
         )
 
     def set_scheme_active(self, scheme_id: int, is_active: bool) -> dict:
         return self._request("PATCH", f"/api/v1/schemes/{scheme_id}/active", params={"is_active": is_active})
+
+    def set_scheme_closing_date(self, scheme_id: int, closing_date: str | None) -> dict:
+        """Set (or clear with None) the end date after which the scheme's submissions lock."""
+        return self._request(
+            "PATCH",
+            f"/api/v1/schemes/{scheme_id}/closing-date",
+            params={"closing_date": closing_date or ""},
+        )
 
     def propose_scheme_update(
         self, scheme_id: int, name: str, description: str, eligibility: str, required_documents: str
@@ -138,6 +154,24 @@ class BackendClient:
     def list_my_applications(self) -> list[dict]:
         return self._request("GET", "/api/v1/applications")
 
+    def update_application(
+        self, application_id: int, scheme_id: int, notes: str, pasted_text: str, files: list[tuple[str, bytes]]
+    ) -> dict:
+        """Replace an editable submission's scheme/documents; re-ingestion restarts in the background."""
+        multipart_files = [("files", (name, content)) for name, content in files] or None
+        return self._request(
+            "PUT",
+            f"/api/v1/applications/{application_id}",
+            data={"scheme_id": scheme_id, "notes": notes, "pasted_text": pasted_text},
+            files=multipart_files,
+        )
+
+    def lock_application(self, application_id: int) -> dict:
+        return self._request("POST", f"/api/v1/applications/{application_id}/lock")
+
+    def unlock_application(self, application_id: int) -> dict:
+        return self._request("POST", f"/api/v1/applications/{application_id}/unlock")
+
     def list_all_applications(self, status_filter: str | None = None) -> list[dict]:
         params = {"status_filter": status_filter} if status_filter else {}
         return self._request("GET", "/api/v1/applications", params=params)
@@ -174,6 +208,12 @@ class BackendClient:
     def approve_score(self, application_id: int) -> dict:
         """Any admin approves the computed score; >=2 distinct approvals completes the timeline."""
         return self._request("POST", f"/api/v1/applications/{application_id}/score/approve")
+
+    def submit_score_feedback(self, application_id: int, feedback: str) -> dict:
+        """Send a reviewer's guidance back to the scoring agent; clears existing approvals."""
+        return self._request(
+            "POST", f"/api/v1/applications/{application_id}/score/feedback", json={"feedback": feedback}
+        )
 
     def restart_pipeline(self, application_id: int) -> dict:
         """Admin-only: restart the pipeline from whichever stage failed."""

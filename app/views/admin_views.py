@@ -6,11 +6,14 @@ endpoint (backend/app/api/reviews.py); no path here can auto-finalize a case.
 """
 from __future__ import annotations
 
+from datetime import date
+
 import streamlit as st
 
 from app.api_client import BackendError
 from app.analysis_view import render_ai_analysis
 from app.file_preview import render_submitted_files
+from app.forms import clear_fields, render_flash, set_flash
 from app.scoring_pattern import render_scoring_pattern
 from app.state import get_client
 from app.timeline import render_timeline
@@ -21,6 +24,12 @@ _DECISION_LABELS = {
     "approved": "Approve",
     "rejected": "Reject",
 }
+_NEW_SCHEME_FIELDS = (
+    "new_scheme_name",
+    "new_scheme_description",
+    "new_scheme_eligibility",
+    "new_scheme_required_documents",
+)
 _TIMELINE_STAGE_LABELS = {
     "ingesting": "🟠 Ingesting & indexing",
     "awaiting_admin_review": "🟠 Awaiting admin assignment",
@@ -66,6 +75,7 @@ def admin_submissions_view(user: dict) -> None:
 
             assigned_label = sub.get("assigned_admin_name") or "Unassigned"
             st.caption(f"Assigned admin: **{assigned_label}**")
+            _render_lock_controls(client, sub)
 
             cols = st.columns([1, 4])
             if cols[0].button("🔄 Refresh", key=f"refresh_{sub['id']}"):
@@ -138,17 +148,45 @@ def admin_submissions_view(user: dict) -> None:
 
             # --- Stage 3: score approval (any admin) ---
             if sub["timeline_stage"] in ("awaiting_score_approval", "completed"):
+                explanation = sub.get("score_explanation") or {}
+                if explanation.get("requires_human_review"):
+                    st.warning(
+                        "🧠 The scoring agent asked for human review of this score before it is approved."
+                    )
+                    for note in explanation.get("review_notes") or []:
+                        st.caption(f"• {note}")
+                if sub.get("score_feedback"):
+                    st.caption(f"Last scoring guidance given: {sub['score_feedback']}")
+
                 approvals = client.list_score_approvals(sub["id"])
                 approver_ids = {a["admin_id"] for a in approvals}
                 st.caption(
                     f"Score approvals: {len(approvals)}/2 "
                     + (", ".join(a["admin_name"] for a in approvals) if approvals else "none yet")
                 )
-                if sub["timeline_stage"] == "awaiting_score_approval" and user["id"] not in approver_ids:
-                    if st.button("👍 Approve score", key=f"approve_score_{sub['id']}"):
-                        client.approve_score(sub["id"])
-                        st.success("Score approval recorded.")
-                        st.rerun()
+                if sub["timeline_stage"] == "awaiting_score_approval":
+                    if user["id"] not in approver_ids:
+                        if st.button("👍 Approve score", key=f"approve_score_{sub['id']}"):
+                            client.approve_score(sub["id"])
+                            st.success("Score approval recorded.")
+                            st.rerun()
+                    with st.form(f"score_feedback_form_{sub['id']}"):
+                        score_guidance = st.text_area(
+                            "Guide the scoring agent instead (e.g. which criterion to re-assess and why)",
+                            key=f"score_feedback_{sub['id']}",
+                        )
+                        rescore = st.form_submit_button("🔁 Re-score with this guidance")
+                    if rescore:
+                        if not score_guidance.strip():
+                            st.error("Please describe what the scoring agent should reconsider.")
+                        else:
+                            try:
+                                client.submit_score_feedback(sub["id"], score_guidance)
+                            except BackendError as exc:
+                                st.error(str(exc))
+                            else:
+                                st.success("Re-scoring with your guidance; existing approvals were cleared.")
+                                st.rerun()
                 elif sub["timeline_stage"] == "completed":
                     st.success("This submission's timeline is complete.")
 
@@ -212,27 +250,101 @@ def admin_submissions_view(user: dict) -> None:
                         st.rerun()
 
 
+def _render_lock_controls(client, sub: dict) -> None:
+    """Lock/unlock applicant edits; the scheme's end date locks submissions on its own."""
+    if sub.get("scheme_closing_date"):
+        st.caption(f"Scheme closing date: **{sub['scheme_closing_date']}**")
+    if sub.get("locked_at"):
+        st.caption(f"🔒 Locked by {sub.get('locked_by_name') or 'an admin'} on {sub['locked_at']}")
+        if st.button("🔓 Unlock for applicant edits", key=f"unlock_{sub['id']}"):
+            try:
+                client.unlock_application(sub["id"])
+            except BackendError as exc:
+                st.error(str(exc))
+            else:
+                st.rerun()
+        return
+
+    if sub.get("is_editable"):
+        st.caption("🔓 The applicant can still edit this submission.")
+        if st.button("🔒 Lock submission", key=f"lock_{sub['id']}"):
+            try:
+                client.lock_application(sub["id"])
+            except BackendError as exc:
+                st.error(str(exc))
+            else:
+                st.rerun()
+    else:
+        st.caption(f"🔒 Applicant edits are closed. {sub.get('lock_reason') or ''}".strip())
+
+
+def _render_closing_date_control(client, scheme: dict) -> None:
+    """Set or clear the scheme's end date; submissions lock for applicants once it passes."""
+    current = scheme.get("closing_date")
+    st.caption(f"Closing date: **{current or 'not set'}**")
+    cols = st.columns([2, 1, 1])
+    new_date = cols[0].date_input(
+        "Closing date",
+        value=date.fromisoformat(current) if current else None,
+        key=f"closing_date_{scheme['id']}",
+        label_visibility="collapsed",
+    )
+    if cols[1].button("Save date", key=f"save_closing_{scheme['id']}"):
+        try:
+            client.set_scheme_closing_date(scheme["id"], new_date.isoformat() if new_date else None)
+        except BackendError as exc:
+            st.error(str(exc))
+        else:
+            st.rerun()
+    if current and cols[2].button("Clear date", key=f"clear_closing_{scheme['id']}"):
+        try:
+            client.set_scheme_closing_date(scheme["id"], None)
+        except BackendError as exc:
+            st.error(str(exc))
+        else:
+            st.rerun()
+
+
 def admin_schemes_view(user: dict) -> None:
     st.subheader("Manage Schemes")
     client = get_client()
+    render_flash("new_scheme")
     with st.form("new_scheme_form"):
-        name = st.text_input("Scheme name")
-        description = st.text_area("Description")
-        eligibility = st.text_area("Eligibility criteria")
-        required_documents = st.text_area("Required documents")
+        name = st.text_input("Scheme name", key="new_scheme_name")
+        description = st.text_area("Description", key="new_scheme_description")
+        eligibility = st.text_area("Eligibility criteria", key="new_scheme_eligibility")
+        required_documents = st.text_area("Required documents", key="new_scheme_required_documents")
+        closing_date = st.date_input(
+            "Closing date (submissions lock for applicant edits after this date)",
+            value=None,
+            key="new_scheme_closing_date",
+        )
         submitted = st.form_submit_button("Create scheme")
     if submitted:
         if not name.strip() or not description.strip():
             st.error("Name and description are required.")
         else:
-            client.create_scheme(name, description, eligibility, required_documents)
-            st.success(f"Scheme '{name}' created.")
-            st.rerun()
+            try:
+                client.create_scheme(
+                    name,
+                    description,
+                    eligibility,
+                    required_documents,
+                    closing_date.isoformat() if closing_date else None,
+                )
+            except BackendError as exc:
+                st.error(str(exc))
+            else:
+                set_flash("new_scheme", f"Scheme '{name}' created.")
+                clear_fields(*_NEW_SCHEME_FIELDS)
+                st.rerun()
 
     st.divider()
     st.markdown("### Existing schemes")
     for scheme in client.list_schemes(active_only=False):
         label = f"{scheme['name']} — {'active' if scheme['is_active'] else 'inactive'}"
+        if scheme.get("closing_date"):
+            label += f" · closes {scheme['closing_date']}"
         if scheme.get("pending_update"):
             label += " · ⏳ pending edit"
         with st.expander(label):
@@ -242,6 +354,7 @@ def admin_schemes_view(user: dict) -> None:
             if scheme["required_documents"]:
                 st.markdown(f"**Required documents:** {scheme['required_documents']}")
             render_scoring_pattern(scheme.get("scoring_pattern"))
+            _render_closing_date_control(client, scheme)
 
             toggle_label = "Deactivate" if scheme["is_active"] else "Activate"
             if st.button(toggle_label, key=f"toggle_scheme_{scheme['id']}"):

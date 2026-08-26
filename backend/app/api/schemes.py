@@ -6,6 +6,8 @@ pending_update and only takes effect once >= 2 distinct admins approve it
 for submissions (backend/app/api/applications.py)."""
 from __future__ import annotations
 
+import re
+
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from backend.app.schemas import SchemeIn, SchemeOut, SchemeUpdateApprovalOut
@@ -41,12 +43,31 @@ def list_schemes(active_only: bool = True, current_user: dict = Depends(get_curr
 @router.post("", response_model=SchemeOut, status_code=201)
 def create_scheme(payload: SchemeIn, current_user: dict = Depends(require_role("admin"))) -> SchemeOut:
     scheme_id = db.create_scheme(
-        payload.name, payload.description, payload.eligibility, payload.required_documents, current_user["id"]
+        payload.name,
+        payload.description,
+        payload.eligibility,
+        payload.required_documents,
+        current_user["id"],
+        payload.closing_date,
     )
     pattern = generate_scheme_scoring_pattern(
         payload.name, payload.description, payload.eligibility, payload.required_documents
     )
     db.set_scheme_scoring_pattern(scheme_id, pattern.model_dump())
+    return _to_out(_get_or_404(scheme_id))
+
+
+@router.patch("/{scheme_id}/closing-date", response_model=SchemeOut)
+def set_scheme_closing_date(
+    scheme_id: int, closing_date: str = "", current_user: dict = Depends(require_role("admin"))
+) -> SchemeOut:
+    """Set the scheme's end date (YYYY-MM-DD), after which its submissions lock against
+    applicant edits. An empty value clears the date. Single-admin, like /active."""
+    _get_or_404(scheme_id)
+    value = closing_date.strip() or None
+    if value and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+        raise HTTPException(status_code=422, detail="closing_date must be YYYY-MM-DD.")
+    db.set_scheme_closing_date(scheme_id, value)
     return _to_out(_get_or_404(scheme_id))
 
 
@@ -69,7 +90,7 @@ def propose_scheme_update(
     pattern = generate_scheme_scoring_pattern(
         payload.name, payload.description, payload.eligibility, payload.required_documents
     )
-    updates = {**payload.model_dump(), "scoring_pattern": pattern.model_dump()}
+    updates = {**payload.model_dump(exclude={"closing_date"}), "scoring_pattern": pattern.model_dump()}
     db.propose_scheme_update(scheme_id, updates, current_user["id"])
     return _to_out(_get_or_404(scheme_id))
 

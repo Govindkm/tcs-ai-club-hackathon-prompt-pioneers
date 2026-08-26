@@ -24,6 +24,7 @@ from src.agents.scoring_pattern_agent import create_scoring_pattern_agent
 from src.agents.validation_agent import create_validation_agent
 from src.agents.workflow_agent import create_workflow_agent
 from src.tools.embedding_tools import check_document_similarity, index_document_bundle
+from src.tools.validation_tools import split_requirements
 
 EventSink = Callable[[str, str, str], None]
 
@@ -103,29 +104,59 @@ class ApplicationPipeline:
     def run_validation(
         self,
         extracted_fields: dict,
-        required_fields: list[str],
+        scheme: dict,
+        submitted_documents: list[dict] | None = None,
         admin_feedback: str = "",
         plagiarism_summary: dict | None = None,
         organisation_name: str | None = None,
         scoring_pattern: dict | None = None,
     ) -> ValidationResult:
+        """Validate the submission against this scheme's own stated requirements and
+        verify the applicant organisation, rather than against any hardcoded field list."""
+        required_documents = split_requirements(scheme.get("required_documents", ""))
+        eligibility = split_requirements(scheme.get("eligibility", ""))
+        document_summaries = [
+            {
+                "title": document.get("title"),
+                "status": document.get("status"),
+                "content": str(document.get("content") or "")[:1500],
+            }
+            for document in (submitted_documents or [])
+        ]
+
         feedback_note = f"\n\nAdmin feedback to incorporate: {admin_feedback}" if admin_feedback else ""
         plagiarism_note = (
             f"\n\nPlagiarism/duplicate-content check result: {plagiarism_summary}" if plagiarism_summary else ""
         )
-        org_note = f"\n\nApplicant organisation name: {organisation_name}" if organisation_name else ""
+        organisation_note = (
+            f"\n\nApplicant organisation name: '{organisation_name}'. Call verify_organisation_online with "
+            f"exactly this name and put its raw result in organisation_check; if it has no findable presence, "
+            f"add a risk flag such as 'no_online_presence_found'."
+            if organisation_name
+            else "\n\nNo applicant organisation name was supplied - flag 'applicant_organisation_unknown'."
+        )
         scoring_pattern_note = (
-            f"\n\nThis scheme's scoring criteria (for context on what matters when assessing "
-            f"completeness/risk): {scoring_pattern}"
+            f"\n\nThis scheme's scoring criteria (context for what matters here): {scoring_pattern}"
             if scoring_pattern
             else ""
         )
-        self._event_sink("validation", "stage_start", "Checking completeness and authenticity risk.")
+
+        self._event_sink("validation", "stage_start", "Validating against scheme requirements and verifying the applicant.")
         validation = self.validation_agent.structured_output(
             ValidationResult,
-            "Validate completeness of these extracted fields against the required "
-            f"fields {required_fields}, and flag any authenticity risks. "
-            f"Extracted fields: {extracted_fields}{plagiarism_note}{org_note}{scoring_pattern_note}{feedback_note}",
+            f"Validate this application against the scheme it was submitted to.\n\n"
+            f"Scheme: {scheme.get('name', '')}\n"
+            f"Scheme description: {scheme.get('description', '')}\n"
+            f"Documents this scheme requires: {required_documents}\n"
+            f"Eligibility criteria: {eligibility}\n\n"
+            f"Call check_scheme_requirements with those required documents and the submitted documents to "
+            f"determine which requirements are met, missing, or unusable. Then check the extracted values "
+            f"for contradictions against each other and against the scheme's stated limits, and call "
+            f"flag_authenticity_risks."
+            f"{organisation_note}\n\n"
+            f"Submitted documents: {document_summaries}\n"
+            f"Extracted fields: {extracted_fields}"
+            f"{plagiarism_note}{scoring_pattern_note}{feedback_note}",
         )
         self._event_sink("validation", "stage_complete", validation.model_dump_json())
         return validation
@@ -133,38 +164,44 @@ class ApplicationPipeline:
     def run_scoring(
         self, validation_result: dict, admin_feedback: str = "", scoring_pattern: dict | None = None
     ) -> ScoringResult:
-        feedback_note = f"\n\nAdmin feedback to incorporate: {admin_feedback}" if admin_feedback else ""
+        feedback_note = (
+            f"\n\nA human reviewer has looked at your previous score and gave this guidance - apply it "
+            f"to the affected criteria and explain in review_notes how it changed your assessment: "
+            f"{admin_feedback}"
+            if admin_feedback
+            else ""
+        )
+        review_note = (
+            "\n\nSet requires_human_review to true and list what a human must check in review_notes "
+            "if any criterion rests on weak, conflicting, or missing evidence."
+        )
         self._event_sink("scoring", "stage_start", "Computing an explainable advisory score.")
         if scoring_pattern:
             prompt = (
                 "Apply this scheme's own scoring pattern exactly - call apply_scheme_score with "
                 f"criteria={scoring_pattern.get('criteria', [])} and your assessed awarded value "
                 f"(0-100) per criterion name, justified by this validation result: "
-                f"{validation_result}{feedback_note}"
+                f"{validation_result}{review_note}{feedback_note}"
             )
         else:
-            prompt = f"Compute an explainable score from this validation result: {validation_result}{feedback_note}"
+            prompt = (
+                f"Compute an explainable score from this validation result: "
+                f"{validation_result}{review_note}{feedback_note}"
+            )
         scoring = self.scoring_agent.structured_output(ScoringResult, prompt)
-        self._event_sink("scoring", "stage_complete", scoring.model_dump_json())
-        return scoring
-        feedback_note = f"\n\nAdmin feedback to incorporate: {admin_feedback}" if admin_feedback else ""
-        self._event_sink("scoring", "stage_start", "Computing an explainable advisory score.")
-        scoring = self.scoring_agent.structured_output(
-            ScoringResult,
-            f"Compute an explainable score from this validation result: {validation_result}{feedback_note}",
-        )
         self._event_sink("scoring", "stage_complete", scoring.model_dump_json())
         return scoring
 
     def process(
         self,
         document_text: str,
-        required_fields: list[str],
+        scheme: dict,
         admin_feedback: str = "",
         document_bundle: list[dict] | None = None,
         scheme_id: int | None = None,
         scheme_title: str = "",
         submission_id: int | None = None,
+        organisation_name: str | None = None,
     ) -> dict:
         """Convenience wrapper that runs the full pipeline end-to-end (used by the
         offline demo script). The live backend instead calls the granular
@@ -182,7 +219,12 @@ class ApplicationPipeline:
 
         extraction = self.run_extraction(document_text, admin_feedback)
         validation = self.run_validation(
-            extraction.extracted_fields, required_fields, admin_feedback, plagiarism_summary
+            extraction.extracted_fields,
+            scheme,
+            submitted_documents=document_bundle,
+            admin_feedback=admin_feedback,
+            plagiarism_summary=plagiarism_summary,
+            organisation_name=organisation_name,
         )
         scoring = self.run_scoring(validation.model_dump(), admin_feedback)
 
