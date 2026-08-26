@@ -69,55 +69,78 @@ The POC must demonstrate every normalized capability from the eight relevant pro
 
 **Team Name:** Prompt Pioneers
 
+## Documentation
+
+- [Architecture overview](docs/architecture.md) - detailed component boundaries, data flows, persistence, security, and Mermaid diagrams.
+- [Developer guide](docs/developer-guide.md) - local setup, day-to-day workflows, testing, configuration, and extension patterns.
+
+The README is the quick orientation. The two documents above are the detailed guides for maintaining and extending the current implementation.
+
 ---
 
 ## Repository Structure
 
 ```
 .
-├── docs/                  # Architecture, ADRs, data-flow & threat-boundary diagrams
-├── data/                  # Synthetic dataset generation & samples (non-sensitive only); app.db (gitignored)
+├── streamlit_app.py        # Streamlit entrypoint (streamlit run streamlit_app.py)
+├── app/                    # Streamlit portal - thin client only, no business logic
+│   ├── api_client.py               # BackendClient: the only way views talk to the backend
+│   ├── state.py                    # Session state (current user + BackendClient instance)
+│   ├── analysis_view.py            # Renders extraction/validation/scoring results
+│   ├── timeline.py                 # Color-coded submission timeline widget
+│   ├── scoring_pattern.py          # Renders a scheme's weighted scoring pattern
+│   ├── file_preview.py             # Previews/downloads originally uploaded files
+│   ├── forms.py                    # Form clearing, uploader reset, flash messages
+│   └── views/                      # auth, applicant, admin, notifications views
+├── backend/
+│   └── app/
+│       ├── main.py                # FastAPI entrypoint (uvicorn backend.app.main:app)
+│       ├── security.py            # JWT auth (create/verify token, get_current_user, require_role)
+│       ├── schemas.py             # Pydantic request/response models
+│       └── api/                   # Routers: auth, users, schemes, applications,
+│                                  #   reviews, notifications, health
+├── src/
+│   ├── agents/            # Strands Agent definitions (one per stage) + orchestrator
+│   │   ├── base.py                # Wires each agent's tools + AgentSkills plugin from config
+│   │   ├── orchestrator.py        # Staged pipeline + scheme scoring-pattern generation
+│   │   ├── model_provider.py      # Provider abstraction (Bedrock/Anthropic/OpenAI/Ollama)
+│   │   └── results.py             # Pydantic structured-output models per stage
+│   ├── tools/              # Strands @tool callables granted to agents, grouped by domain
+│   │   ├── document_tools.py      # Extraction & summarization tools
+│   │   ├── embedding_tools.py     # Chroma indexing + duplicate/plagiarism check
+│   │   ├── validation_tools.py    # Scheme-requirement & authenticity-risk tools
+│   │   ├── verification_tools.py  # Organisation legitimacy check (Exa, optional)
+│   │   ├── scoring_tools.py       # Configurable rules + explainable scoring tools
+│   │   └── workflow_tools.py      # Reviewer routing, decision recording, audit trail
+│   ├── db/                 # Pluggable DB layer: config + adapters, schema, repository
+│   │   └── adapters/              # sqlite (default) and postgres adapters
+│   ├── ingestion/         # File/zip extraction (document_reader.py), raw-file storage
+│   │                      #   (storage.py), vision OCR (vision.py)
+│   ├── vectorstore/       # ChromaDB persistence + similarity search (chroma_store.py)
+│   └── telemetry.py        # OpenTelemetry tracing setup (console/OTLP exporters)
 ├── config/
 │   ├── models.yaml        # Model provider config (Bedrock/Anthropic/OpenAI/Ollama)
 │   ├── database.yaml      # Database backend config (sqlite/postgres adapters)
 │   └── agents.yaml        # Declarative agent -> tools/skills mapping
 ├── skills/                # Agent Skills (SKILL.md packages, per agentskills.io spec)
 │   ├── document-extraction/        # Extraction & summarization instructions
+│   ├── embedding-storage/          # Document-bundle indexing instructions
 │   ├── completeness-validation/    # Completeness & authenticity-risk instructions
 │   ├── explainable-scoring/        # Rule scoring instructions + references/
+│   ├── scheme-scoring-design/      # Scheme scoring-pattern design instructions
 │   └── reviewer-workflow/          # Reviewer routing & audit-trail instructions
-├── app/                    # Streamlit portal (views + session-state helpers)
-│   ├── state.py                    # Current-user session-state helpers
-│   └── views/                      # auth, applicant, admin, notifications views
-├── streamlit_app.py        # Streamlit entrypoint (streamlit run streamlit_app.py)
-├── src/
-│   ├── agents/            # Strands Agent definitions (one per pipeline stage) + orchestrator
-│   │   └── base.py                # Wires each agent's tools + AgentSkills plugin from config
-│   ├── tools/              # Strands @tool callables granted to agents, grouped by domain
-│   │   ├── document_tools.py      # Extraction & summarization tools
-│   │   ├── validation_tools.py    # Completeness & authenticity-risk tools
-│   │   ├── scoring_tools.py       # Configurable rules + explainable scoring tools
-│   │   └── workflow_tools.py      # Reviewer routing, decision recording, audit trail
-│   ├── db/                 # Pluggable DB layer: config + adapters, schema, repository
-│   ├── ingestion/         # Heterogeneous file/zip extraction (document_reader.py) + vision OCR (vision.py)
-│   ├── analytics/         # Operational analytics & reporting
-│   ├── adapters/          # Mock adapters (schemes portal, messaging, identity)
-│   └── telemetry.py        # OpenTelemetry tracing setup (console/OTLP exporters)
 ├── scripts/
-│   ├── seed_db.py             # Creates a default admin user only
-│   └── run_pipeline_demo.py  # End-to-end demo of the agent pipeline
-├── backend/
-│   └── app/
-│       ├── main.py                # FastAPI entrypoint (uvicorn backend.app.main:app)
-│       ├── security.py            # JWT auth (create/verify token, get_current_user, require_role)
-│       ├── schemas.py             # Pydantic request/response models
-│       └── api/                   # Routers: auth, schemes, applications, reviews, notifications, health
-├── app/                    # Streamlit portal - thin client only, calls the API via api_client.py
-│   ├── api_client.py               # BackendClient: the only thing views use to talk to the backend
-│   ├── state.py                    # Session-state helpers (current user + BackendClient instance)
-│   └── views/                      # auth, applicant, admin, notifications views (no business logic)
-├── streamlit_app.py        # Streamlit entrypoint (streamlit run streamlit_app.py)
-├── notebooks/             # Model/evaluation notebooks
+│   ├── seed_db.py                     # Creates a default admin user only
+│   ├── run_dev.ps1                    # Seeds DB + starts backend and Streamlit
+│   ├── run_pipeline_demo.py           # End-to-end demo of the agent pipeline
+│   ├── generate_application_files.py  # Renders the synthetic dataset into real files
+│   └── export_openapi.py              # Dumps the OpenAPI contract
+├── docs/
+│   ├── architecture.md    # Component boundaries, data flows, diagrams
+│   └── developer-guide.md # Setup, workflows, testing, extension patterns
+├── data/                  # Synthetic dataset + generated applications (non-sensitive only)
+│                          #   app.db, chroma/, uploads/ are gitignored
+├── notebooks/             # Colab notebooks (Ollama server, full stack, extraction, embeddings)
 ├── tests/                 # Automated tests for critical paths
 ├── .env.example           # Model provider credentials/config template
 ├── pyproject.toml
@@ -206,11 +229,13 @@ SDK concepts are used together, per the [Skills plugin docs](https://strandsagen
 | Scoring agent | `scoring_tools` | `explainable-scoring` |
 | Workflow agent | `workflow_tools` | `reviewer-workflow` |
 
-The **orchestrator** (`src/agents/orchestrator.py`) runs the four agents as a pipeline.
-Agent-to-tool/skill assignments are declared in [config/agents.yaml](config/agents.yaml) and
-wired in [src/agents/base.py](src/agents/base.py) so capabilities stay auditable — no tool
-can finalize an approval/rejection; human review is always required per the platform's
-core constraint.
+The **orchestrator** (`src/agents/orchestrator.py`) runs the application stages as a pipeline:
+embedding/index checks, extraction, validation, and scoring. The separate
+`scoring_pattern_agent` designs a scheme rubric when a scheme is created or edited, while the
+`workflow_agent` provides routing/audit capabilities. Agent-to-tool/skill assignments are
+declared in [config/agents.yaml](config/agents.yaml) and wired in
+[src/agents/base.py](src/agents/base.py) so capabilities stay auditable — no tool can finalize
+an approval/rejection; human review is always required per the platform's core constraint.
 
 ## Observability (Tracing & Telemetry)
 
@@ -319,7 +344,7 @@ python scripts/run_pipeline_demo.py
 ```
 
 Steps 4-7 can also be run in one go with [scripts/run_dev.ps1](scripts/run_dev.ps1), which
-seeds the DB and launches the backend + Streamlit UI in their own windows:
+seeds the DB and launches the backend + Streamlit UI in separate PowerShell windows:
 
 ```powershell
 .\scripts\run_dev.ps1                # seed + start API + Streamlit
