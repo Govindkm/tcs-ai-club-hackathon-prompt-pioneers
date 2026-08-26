@@ -60,6 +60,18 @@ class SchemeOut(BaseModel):
     required_documents: str
     is_active: bool
     created_at: str
+    pending_update: dict | None = None
+    pending_update_by_name: str | None = None
+    pending_update_at: str | None = None
+    scoring_pattern: dict | None = None
+
+
+class SchemeUpdateApprovalOut(BaseModel):
+    id: int
+    scheme_id: int
+    admin_id: int
+    admin_name: str
+    created_at: str
 
 
 class SubmissionOut(BaseModel):

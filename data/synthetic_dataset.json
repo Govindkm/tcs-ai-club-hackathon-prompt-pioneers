@@ -1,0 +1,231 @@
+{
+  "dataset_id": "decc-synthetic-benchmark-v1",
+  "classification": "RESTRICTED - synthetic data only; process locally",
+  "purpose": "Benchmark fixtures for extraction, completeness, contradiction, duplicate, authenticity-risk, scoring, and human review workflows.",
+  "runtime_rule": "These records are not database seed data. Create a scheme through the system, submit an application, and let the system perform analysis at submission time.",
+  "schemes": [
+    {
+      "scheme_id": "SCHEME-SOLAR",
+      "name": "Rural Solar Microgrid Grant",
+      "description": "Capital grants for community-owned solar microgrids serving remote settlements and public facilities.",
+      "funding": {"min_amount": 250000, "max_amount": 5000000, "currency": "INR", "match_funding_required": true, "match_funding_percent": 20},
+      "eligibility": ["Registered cooperative, local authority, or not-for-profit organisation", "Project site is in a rural or underserved settlement", "At least 20 percent of eligible cost is confirmed as match funding", "No unresolved prior grant default"],
+      "required_documents": ["application_form", "project_proposal", "itemised_budget", "registration_certificate", "site_ownership_or_consent", "match_funding_proof", "recent_audited_financials"],
+      "scoring_rubric": [
+        {"criterion": "climate_and_energy_impact", "weight": 30, "anchors": {"0": "No measurable impact", "50": "Plausible impact with limited baseline", "100": "Quantified emissions and access benefits with credible baseline"}},
+        {"criterion": "technical_feasibility", "weight": 25, "anchors": {"0": "No design or unsafe design", "50": "Partially specified design", "100": "Complete load, storage, maintenance, and implementation plan"}},
+        {"criterion": "financial_value", "weight": 20, "anchors": {"0": "Budget absent or unusable", "50": "Partially supported costs", "100": "Itemised, eligible, and market-supported budget"}},
+        {"criterion": "community_benefit", "weight": 15, "anchors": {"0": "No beneficiary evidence", "50": "General benefit claim", "100": "Verified beneficiaries, access plan, and community governance"}},
+        {"criterion": "delivery_capacity", "weight": 10, "anchors": {"0": "No accountable team", "50": "Some relevant experience", "100": "Named team with relevant delivery and financial controls"}}
+      ],
+      "decision_guidance": {"recommended_shortlist": 70, "automatic_human_review_below": 50, "hard_stops": ["ineligible applicant", "missing match funding proof", "material authenticity concern"]}
+    },
+    {
+      "scheme_id": "SCHEME-FOREST",
+      "name": "Community Forest Restoration Fund",
+      "description": "Performance-linked support for native habitat restoration, nursery development, and community stewardship.",
+      "funding": {"min_amount": 100000, "max_amount": 3000000, "currency": "INR", "match_funding_required": false},
+      "eligibility": ["Community group, panchayat, registered trust, or forest institution", "Legitimate access to the proposed restoration land", "Restoration plan uses locally suitable native species", "Safeguards for community participation and land rights"],
+      "required_documents": ["application_form", "restoration_plan", "itemised_budget", "registration_certificate", "land_access_consent", "baseline_site_report", "safeguard_and_grievance_plan"],
+      "scoring_rubric": [
+        {"criterion": "ecological_outcome", "weight": 30, "anchors": {"0": "Activity has no ecological basis", "50": "Reasonable restoration intent", "100": "Measurable native-species and habitat outcomes with baseline"}},
+        {"criterion": "site_and_method_quality", "weight": 25, "anchors": {"0": "Site or methods not credible", "50": "Basic site and method description", "100": "Verified site, species plan, maintenance, and monitoring"}},
+        {"criterion": "community_stewardship", "weight": 20, "anchors": {"0": "No participation model", "50": "Participation asserted", "100": "Roles, consent, inclusion, and grievance process documented"}},
+        {"criterion": "budget_and_sustainability", "weight": 15, "anchors": {"0": "Budget missing", "50": "Budget partly supported", "100": "Eligible costs and post-grant maintenance funded"}},
+        {"criterion": "delivery_capacity", "weight": 10, "anchors": {"0": "No delivery capability", "50": "Some experience", "100": "Experienced team and reliable reporting controls"}}
+      ],
+      "decision_guidance": {"recommended_shortlist": 68, "automatic_human_review_below": 48, "hard_stops": ["no land access consent", "material land-rights conflict", "material authenticity concern"]}
+    },
+    {
+      "scheme_id": "SCHEME-WATER",
+      "name": "Climate Resilient Watershed Innovation Scheme",
+      "description": "Pilot grants for locally governed water conservation, recharge, flood mitigation, and drought resilience.",
+      "funding": {"min_amount": 500000, "max_amount": 8000000, "currency": "INR", "match_funding_required": true, "match_funding_percent": 10},
+      "eligibility": ["Public body, registered non-profit, research institution, or producer collective", "Intervention addresses a documented local water risk", "Monitoring indicators and responsible operator are identified", "Required permissions can be obtained before construction"],
+      "required_documents": ["application_form", "technical_concept", "itemised_budget", "registration_certificate", "water_risk_baseline", "permissions_or_no_objection", "monitoring_plan"],
+      "scoring_rubric": [
+        {"criterion": "resilience_and_water_outcome", "weight": 30, "anchors": {"0": "No water-risk link", "50": "Plausible but weakly quantified outcome", "100": "Quantified recharge, conservation, or flood-risk outcome"}},
+        {"criterion": "innovation_and_replication", "weight": 20, "anchors": {"0": "No meaningful innovation", "50": "Adaptation of an existing approach", "100": "Evidence-based innovation with a credible replication pathway"}},
+        {"criterion": "technical_and_regulatory_feasibility", "weight": 25, "anchors": {"0": "Unsafe or impermissible", "50": "Feasible subject to clarification", "100": "Sound design, permissions path, risks, and safeguards"}},
+        {"criterion": "value_for_money", "weight": 15, "anchors": {"0": "Budget absent or implausible", "50": "Partially supported budget", "100": "Costed outputs and transparent procurement assumptions"}},
+        {"criterion": "monitoring_and_governance", "weight": 10, "anchors": {"0": "No owner or indicators", "50": "Basic monitoring intent", "100": "Named owner, indicators, reporting cadence, and community feedback"}}
+      ],
+      "decision_guidance": {"recommended_shortlist": 72, "automatic_human_review_below": 52, "hard_stops": ["required permission impossible", "unresolved safety issue", "material authenticity concern"]}
+    }
+  ],
+  "applications": [
+    {
+      "application_id": "APP-SOLAR-001",
+      "scheme_id": "SCHEME-SOLAR",
+      "applicant": {"name": "Kiranwadi Energy Cooperative", "type": "registered_cooperative", "district": "Nandipur", "requested_amount": 2400000, "match_funding": 650000},
+      "documents": [
+        {"document_id": "D1", "type": "application_form", "quality": "good", "text": "Kiranwadi Energy Cooperative requests INR 2,400,000 for a 180 kW solar microgrid serving 312 households, a clinic, and two schools. Project duration: 12 months."},
+        {"document_id": "D2", "type": "project_proposal", "quality": "good", "text": "The design includes 180 kW PV, 360 kWh battery storage, prepaid meters, local operator training, and an annual maintenance reserve. Baseline diesel use is 86,000 litres per year."},
+        {"document_id": "D3", "type": "itemised_budget", "quality": "good", "text": "PV and inverters INR 1,180,000; batteries INR 620,000; civil works INR 210,000; training INR 90,000; monitoring INR 70,000; contingency INR 230,000. Total INR 2,400,000."},
+        {"document_id": "D4", "type": "registration_certificate", "quality": "good", "text": "Cooperative registration verified in synthetic registry record KEC-2018-44."},
+        {"document_id": "D5", "type": "site_ownership_or_consent", "quality": "good", "text": "Panchayat consent covers the clinic, schools, and battery compound for 15 years."},
+        {"document_id": "D6", "type": "match_funding_proof", "quality": "good", "text": "Cooperative reserve account statement shows INR 650,000 committed to this project."},
+        {"document_id": "D7", "type": "recent_audited_financials", "quality": "good", "text": "Audited statements for FY2024-25 show positive reserves and no grant default."}
+      ],
+      "benchmark_labels": {"coverage": ["complete"], "expected_completeness": "complete", "expected_risk": "low", "expected_reviewer_action": "proceed_to_scoring", "ground_truth_note": "All required evidence is present, internally consistent, and usable."}
+    },
+    {
+      "application_id": "APP-SOLAR-002",
+      "scheme_id": "SCHEME-SOLAR",
+      "applicant": {"name": "Madhavpur Women's Collective", "type": "community_group", "district": "Madhavpur", "requested_amount": 1800000, "match_funding": 0},
+      "documents": [
+        {"document_id": "D1", "type": "application_form", "quality": "fair", "text": "Request for a 120 kW solar project serving approximately 200 homes. Requested amount INR 1,800,000."},
+        {"document_id": "D2", "type": "project_proposal", "quality": "fair", "text": "The collective will install panels and train two operators. Site address and implementation schedule are not stated."},
+        {"document_id": "D3", "type": "itemised_budget", "quality": "poor", "text": "Panels 1,100,000; other costs 700,000. No quantities, supplier assumptions, or total breakdown."}
+      ],
+      "benchmark_labels": {"coverage": ["incomplete"], "expected_completeness": "incomplete", "expected_risk": "medium", "expected_reviewer_action": "request_more_information", "missing_documents": ["registration_certificate", "site_ownership_or_consent", "match_funding_proof", "recent_audited_financials"], "ground_truth_note": "The proposal is plausible but cannot establish eligibility, site control, match funding, or financial capacity."}
+    },
+    {
+      "application_id": "APP-SOLAR-003",
+      "scheme_id": "SCHEME-SOLAR",
+      "applicant": {"name": "Sunrise Rural Services Ltd", "type": "registered_company", "district": "Bhavanagar", "requested_amount": 3100000, "match_funding": 900000},
+      "documents": [
+        {"document_id": "D1", "type": "application_form", "quality": "good", "text": "Project serves 450 households with a 250 kW system. Project period April 2026 to March 2027. Total project cost INR 4,000,000."},
+        {"document_id": "D2", "type": "project_proposal", "quality": "good", "text": "The proposal states 180 kW PV and 300 kWh storage, serving 280 households. Project period July 2026 to June 2027."},
+        {"document_id": "D3", "type": "itemised_budget", "quality": "good", "text": "Budget total INR 4,000,000, with match contribution INR 900,000 and grant request INR 3,100,000."},
+        {"document_id": "D4", "type": "registration_certificate", "quality": "good", "text": "Company certificate number SRS-2021-09."},
+        {"document_id": "D5", "type": "site_ownership_or_consent", "quality": "fair", "text": "Letter refers to a site in Bhavanagar but does not include a survey number."},
+        {"document_id": "D6", "type": "match_funding_proof", "quality": "good", "text": "Board resolution commits INR 900,000."},
+        {"document_id": "D7", "type": "recent_audited_financials", "quality": "good", "text": "Audited accounts supplied for FY2024-25."}
+      ],
+      "benchmark_labels": {"coverage": ["contradictory", "borderline"], "expected_completeness": "complete_with_contradictions", "expected_risk": "medium", "expected_reviewer_action": "clarify_before_scoring", "contradictions": ["capacity and beneficiary counts differ between form and proposal", "project dates differ between form and proposal"], "ground_truth_note": "Documents exist, but material scope conflicts prevent reliable scoring until clarified."}
+    },
+    {
+      "application_id": "APP-SOLAR-004",
+      "scheme_id": "SCHEME-SOLAR",
+      "applicant": {"name": "Nirmal Gram Development Forum", "type": "registered_nonprofit", "district": "Nirmal", "requested_amount": 2750000, "match_funding": 500000},
+      "documents": [
+        {"document_id": "D1", "type": "application_form", "quality": "low", "text": "REQUEST SOLAR. NIRMAL GRAM. 300 HOMES. AMOUNT 2750000."},
+        {"document_id": "D2", "type": "project_proposal", "quality": "low", "text": "Unreadable scan with fragmented text: panels... village... jobs... no clear design or timeline."},
+        {"document_id": "D3", "type": "itemised_budget", "quality": "low", "text": "Total 2.75m. Handwritten line items are not legible; arithmetic cannot be checked."},
+        {"document_id": "D4", "type": "registration_certificate", "quality": "fair", "text": "Registration number NGDF-2016-20; issuing authority is partly obscured."},
+        {"document_id": "D5", "type": "site_ownership_or_consent", "quality": "low", "text": "Photograph of an unsigned letter; site boundaries cannot be read."},
+        {"document_id": "D6", "type": "match_funding_proof", "quality": "fair", "text": "Unverified screenshot showing INR 500,000."},
+        {"document_id": "D7", "type": "recent_audited_financials", "quality": "good", "text": "Audited accounts supplied, but not linked to the budget."}
+      ],
+      "benchmark_labels": {"coverage": ["low_quality", "suspicious"], "expected_completeness": "present_but_unusable", "expected_risk": "high", "expected_reviewer_action": "manual_verification", "suspicious_indicators": ["illegible certificate and consent", "unverified financial screenshot", "budget arithmetic not reproducible"], "ground_truth_note": "Required document types are present, but evidence quality and authenticity indicators require human verification."}
+    },
+    {
+      "application_id": "APP-FOREST-001",
+      "scheme_id": "SCHEME-FOREST",
+      "applicant": {"name": "Jeevan Hills Community Trust", "type": "registered_trust", "district": "Jeevan Hills", "requested_amount": 1250000},
+      "documents": [
+        {"document_id": "D1", "type": "application_form", "quality": "good", "text": "Restoration of 180 hectares using native teak, amla, bamboo, and understory species over 24 months."},
+        {"document_id": "D2", "type": "restoration_plan", "quality": "good", "text": "Baseline records 34 percent canopy cover. Plan targets 52 percent cover, 210,000 seedlings, survival surveys at 6, 12, and 24 months."},
+        {"document_id": "D3", "type": "itemised_budget", "quality": "good", "text": "Nursery 320,000; planting 410,000; maintenance 280,000; monitoring 140,000; grievance and inclusion 100,000. Total INR 1,250,000."},
+        {"document_id": "D4", "type": "registration_certificate", "quality": "good", "text": "Trust registration JHCT-2014-18 verified in synthetic registry record."},
+        {"document_id": "D5", "type": "land_access_consent", "quality": "good", "text": "Village council resolution grants restoration access for 5 years and names participating households."},
+        {"document_id": "D6", "type": "baseline_site_report", "quality": "good", "text": "Geotagged sample plots and soil observations cover the proposed blocks."},
+        {"document_id": "D7", "type": "safeguard_and_grievance_plan", "quality": "good", "text": "Plan provides consent meetings, women's participation targets, and a named grievance officer."}
+      ],
+      "benchmark_labels": {"coverage": ["complete"], "expected_completeness": "complete", "expected_risk": "low", "expected_reviewer_action": "proceed_to_scoring", "ground_truth_note": "Strong, consistent evidence across ecological, social, budget, and governance requirements."}
+    },
+    {
+      "application_id": "APP-FOREST-002",
+      "scheme_id": "SCHEME-FOREST",
+      "applicant": {"name": "Riverbend Restoration Society", "type": "registered_nonprofit", "district": "Riverbend", "requested_amount": 980000},
+      "documents": [
+        {"document_id": "D1", "type": "application_form", "quality": "good", "text": "Restoration proposal for 90 hectares, requested amount INR 980,000."},
+        {"document_id": "D2", "type": "restoration_plan", "quality": "good", "text": "Plan covers native planting, community nursery, and two years of maintenance."},
+        {"document_id": "D3", "type": "itemised_budget", "quality": "good", "text": "Budget is itemised and totals INR 980,000."},
+        {"document_id": "D4", "type": "registration_certificate", "quality": "good", "text": "Society registration RRS-2019-77."},
+        {"document_id": "D5", "type": "land_access_consent", "quality": "poor", "text": "Unsigned note says access is expected after a future village meeting; no parcel or landholder is named."},
+        {"document_id": "D6", "type": "baseline_site_report", "quality": "fair", "text": "Short narrative describes erosion but gives no measurements or site coordinates."}
+      ],
+      "benchmark_labels": {"coverage": ["incomplete", "borderline"], "expected_completeness": "incomplete", "expected_risk": "medium", "expected_reviewer_action": "request_more_information", "missing_documents": ["safeguard_and_grievance_plan"], "material_gaps": ["land access is not legally confirmed", "baseline lacks measurable indicators"], "ground_truth_note": "Potentially eligible, but land rights and safeguards must be established before assessment."}
+    },
+    {
+      "application_id": "APP-FOREST-003",
+      "scheme_id": "SCHEME-FOREST",
+      "applicant": {"name": "Green Canopy Initiative", "type": "community_group", "district": "Kalyan", "requested_amount": 1450000},
+      "documents": [
+        {"document_id": "D1", "type": "application_form", "quality": "good", "text": "Restoration of 110 hectares in Kalyan block."},
+        {"document_id": "D2", "type": "restoration_plan", "quality": "good", "text": "Native species plan and maintenance schedule."},
+        {"document_id": "D3", "type": "itemised_budget", "quality": "good", "text": "Budget total INR 1,450,000."},
+        {"document_id": "D4", "type": "registration_certificate", "quality": "good", "text": "Community registration GCI-2020-11."},
+        {"document_id": "D5", "type": "land_access_consent", "quality": "good", "text": "Signed access consent for the Kalyan block."},
+        {"document_id": "D6", "type": "baseline_site_report", "quality": "good", "text": "Baseline and plot photographs are identical to APP-FOREST-001, including the same 34 percent canopy figure and sample-plot identifiers."},
+        {"document_id": "D7", "type": "safeguard_and_grievance_plan", "quality": "good", "text": "Plan is word-for-word identical to APP-FOREST-001 and names Jeevan Hills staff as grievance officers."}
+      ],
+      "benchmark_labels": {"coverage": ["duplicate", "suspicious"], "expected_completeness": "complete_but_flagged", "expected_risk": "high", "expected_reviewer_action": "duplicate_review", "duplicate_of": "APP-FOREST-001", "suspicious_indicators": ["identical baseline measurements and sample identifiers", "copied safeguard plan with another applicant's staff names"], "ground_truth_note": "Document types are complete, but cross-application similarity and identity mismatch require human investigation."}
+    },
+    {
+      "application_id": "APP-FOREST-004",
+      "scheme_id": "SCHEME-FOREST",
+      "applicant": {"name": "Sahyadri Village Council", "type": "local_authority", "district": "Sahyadri", "requested_amount": 2100000},
+      "documents": [
+        {"document_id": "D1", "type": "application_form", "quality": "good", "text": "Restoration of 240 hectares with a requested grant of INR 2,100,000."},
+        {"document_id": "D2", "type": "restoration_plan", "quality": "good", "text": "Plan proposes mixed native species and community nursery; target survival is 78 percent."},
+        {"document_id": "D3", "type": "itemised_budget", "quality": "good", "text": "Budget totals INR 2,100,000 and includes two years of maintenance."},
+        {"document_id": "D4", "type": "registration_certificate", "quality": "good", "text": "Council establishment order SC-1998-03."},
+        {"document_id": "D5", "type": "land_access_consent", "quality": "fair", "text": "Council resolution grants access, but two plots are noted as subject to a pending customary-rights consultation."},
+        {"document_id": "D6", "type": "baseline_site_report", "quality": "good", "text": "Baseline records erosion and canopy cover for all but the two pending plots."},
+        {"document_id": "D7", "type": "safeguard_and_grievance_plan", "quality": "good", "text": "Consultation and grievance mechanism is documented, with a commitment to exclude unresolved plots."}
+      ],
+      "benchmark_labels": {"coverage": ["borderline"], "expected_completeness": "complete_with_condition", "expected_risk": "medium", "expected_reviewer_action": "conditional_human_review", "borderline_factors": ["land-rights consultation pending for part of site", "strong plan includes a feasible exclusion condition"], "ground_truth_note": "The case may proceed only with explicit confirmation that unresolved plots are excluded or rights are settled."}
+    },
+    {
+      "application_id": "APP-WATER-001",
+      "scheme_id": "SCHEME-WATER",
+      "applicant": {"name": "Nadi Basin Producer Collective", "type": "producer_collective", "district": "Nadi Basin", "requested_amount": 4200000, "match_funding": 480000},
+      "documents": [
+        {"document_id": "D1", "type": "application_form", "quality": "good", "text": "Recharge and farm-pond network for 1,200 hectares; requested grant INR 4,200,000."},
+        {"document_id": "D2", "type": "technical_concept", "quality": "good", "text": "The project will restore 18 check dams and add 42 recharge structures, targeting 1.8 million cubic metres of annual recharge."},
+        {"document_id": "D3", "type": "itemised_budget", "quality": "good", "text": "Civil works 2,900,000; survey and design 420,000; community works 510,000; monitoring 220,000; training 150,000. Total INR 4,200,000."},
+        {"document_id": "D4", "type": "registration_certificate", "quality": "good", "text": "Collective registration NBC-2017-31."},
+        {"document_id": "D5", "type": "water_risk_baseline", "quality": "good", "text": "Five-year records show seasonal water table decline and three flood-prone settlements."},
+        {"document_id": "D6", "type": "permissions_or_no_objection", "quality": "good", "text": "Water authority no-objection letter covers the proposed structures."},
+        {"document_id": "D7", "type": "monitoring_plan", "quality": "good", "text": "Named hydrologist and collective monitoring committee will report monthly during construction and quarterly for two years."}
+      ],
+      "benchmark_labels": {"coverage": ["complete"], "expected_completeness": "complete", "expected_risk": "low", "expected_reviewer_action": "proceed_to_scoring", "ground_truth_note": "Complete, coherent case with permissions, baseline, measurable outcomes, and monitoring ownership."}
+    },
+    {
+      "application_id": "APP-WATER-002",
+      "scheme_id": "SCHEME-WATER",
+      "applicant": {"name": "Blue Horizon Research Foundation", "type": "registered_nonprofit", "district": "Dharan", "requested_amount": 5600000, "match_funding": 700000},
+      "documents": [
+        {"document_id": "D1", "type": "application_form", "quality": "fair", "text": "Pilot flood sensor and wetland restoration project for Dharan."},
+        {"document_id": "D2", "type": "technical_concept", "quality": "fair", "text": "Concept describes sensors and wetland work but does not identify construction sites or responsible operator."},
+        {"document_id": "D3", "type": "itemised_budget", "quality": "fair", "text": "Equipment INR 3,900,000; personnel INR 1,700,000. No procurement assumptions."},
+        {"document_id": "D4", "type": "registration_certificate", "quality": "good", "text": "Foundation registration BHRF-2022-04."},
+        {"document_id": "D5", "type": "water_risk_baseline", "quality": "poor", "text": "One paragraph says flooding is serious, with no measurements or historical source."}
+      ],
+      "benchmark_labels": {"coverage": ["incomplete", "low_quality"], "expected_completeness": "incomplete", "expected_risk": "medium", "expected_reviewer_action": "request_more_information", "missing_documents": ["permissions_or_no_objection", "monitoring_plan"], "ground_truth_note": "The idea is relevant but lacks permission evidence, measurable baseline, operating ownership, and a usable monitoring plan."}
+    },
+    {
+      "application_id": "APP-WATER-003",
+      "scheme_id": "SCHEME-WATER",
+      "applicant": {"name": "Resilient Delta Labs", "type": "research_institution", "district": "Delta", "requested_amount": 7900000, "match_funding": 900000},
+      "documents": [
+        {"document_id": "D1", "type": "application_form", "quality": "good", "text": "Nature-based floodplain restoration across 60 hectares, total cost INR 8,800,000, grant request INR 7,900,000."},
+        {"document_id": "D2", "type": "technical_concept", "quality": "good", "text": "Project requests grant INR 7,900,000 and describes 45 hectares, 12 sensors, and 900,000 cubic metres of avoided flood volume."},
+        {"document_id": "D3", "type": "itemised_budget", "quality": "good", "text": "Budget total is INR 8,800,000; grant plus match equals INR 8,800,000."},
+        {"document_id": "D4", "type": "registration_certificate", "quality": "good", "text": "Institution certificate RDL-2012-16."},
+        {"document_id": "D5", "type": "water_risk_baseline", "quality": "good", "text": "Hydrological baseline supports flood exposure but covers only 45 hectares."},
+        {"document_id": "D6", "type": "permissions_or_no_objection", "quality": "fair", "text": "Permission application receipt supplied; final construction permission is pending."},
+        {"document_id": "D7", "type": "monitoring_plan", "quality": "good", "text": "Monitoring indicators and named research lead are included."}
+      ],
+      "benchmark_labels": {"coverage": ["contradictory", "borderline"], "expected_completeness": "complete_with_contradictions", "expected_risk": "medium", "expected_reviewer_action": "clarify_before_scoring", "contradictions": ["60 hectares in form versus 45 hectares in concept and baseline", "total cost is above the stated grant plus match only because the form describes a separate contribution without evidence"], "ground_truth_note": "The evidence is substantial, but scope, cost composition, and pending permission need human clarification."}
+    },
+    {
+      "application_id": "APP-WATER-004",
+      "scheme_id": "SCHEME-WATER",
+      "applicant": {"name": "Asha Infrastructure Consortium", "type": "registered_company", "district": "Kaveri", "requested_amount": 8100000, "match_funding": 1000000},
+      "documents": [
+        {"document_id": "D1", "type": "application_form", "quality": "good", "text": "Request for INR 8,100,000 for flood barriers and automated gates."},
+        {"document_id": "D2", "type": "technical_concept", "quality": "good", "text": "Design proposes barriers on a river channel and claims construction can begin next month."},
+        {"document_id": "D3", "type": "itemised_budget", "quality": "good", "text": "Budget total INR 9,100,000, with INR 1,000,000 company contribution."},
+        {"document_id": "D4", "type": "registration_certificate", "quality": "good", "text": "Company certificate AIC-2025-88; issued two weeks before application."},
+        {"document_id": "D5", "type": "water_risk_baseline", "quality": "fair", "text": "Baseline uses generic regional flood statistics and no Kaveri measurements."},
+        {"document_id": "D6", "type": "permissions_or_no_objection", "quality": "poor", "text": "A letterhead PDF says approval is guaranteed; no issuing officer, reference number, or application receipt."},
+        {"document_id": "D7", "type": "monitoring_plan", "quality": "fair", "text": "Monitoring will be done by project staff; no indicators or independent reporting."}
+      ],
+      "benchmark_labels": {"coverage": ["suspicious", "borderline"], "expected_completeness": "complete_but_flagged", "expected_risk": "high", "expected_reviewer_action": "manual_verification", "suspicious_indicators": ["permission letter lacks traceable issuer and reference", "company is newly registered", "generic baseline", "grant request exceeds scheme maximum by INR 100,000"], "ground_truth_note": "Possible hard stop due to funding limit and authenticity concern; do not reject automatically without human review."}
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+EVALUATION METADATA ONLY - do not upload as an application document
+and do not use as runtime analysis input.
+
+{
+  "coverage": [
+    "contradictory",
+    "borderline"
+  ],
+  "expected_completeness": "complete_with_contradictions",
+  "expected_risk": "medium",
+  "expected_reviewer_action": "clarify_before_scoring",
+  "contradictions": [
+    "capacity and beneficiary counts differ between form and proposal",
+    "project dates differ between form and proposal"
+  ],
+  "ground_truth_note": "Documents exist, but material scope conflicts prevent reliable scoring until clarified."
+}

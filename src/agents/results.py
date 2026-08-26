@@ -28,6 +28,21 @@ class ScoringResult(BaseModel):
     explanation: dict[str, Any] = Field(description="Breakdown of factors contributing to the score.")
 
 
+class ScoringCriterion(BaseModel):
+    name: str = Field(description="Short label for this scoring criterion.")
+    weight: float = Field(ge=0.0, le=100.0, description="Weight out of 100; all criteria weights sum to 100.")
+    rationale: str = Field(
+        description="Why this criterion matters for this scheme and how an applicant earns points on it."
+    )
+
+
+class ScoringPatternResult(BaseModel):
+    criteria: list[ScoringCriterion] = Field(
+        description="4-8 weighted, rationale-backed scoring criteria for this scheme."
+    )
+    summary: str = Field(description="Short human-readable summary of the overall scoring approach.")
+
+
 class EmbeddingIndexResult(BaseModel):
     scheme_id: int
     submission_id: int

@@ -37,6 +37,16 @@ class BackendClient:
             raise BackendError(detail)
         return response.json() if response.content else None
 
+    def _request_bytes(self, path: str, timeout: int = _DEFAULT_TIMEOUT) -> bytes:
+        response = requests.get(f"{self.base_url}{path}", headers=self._headers(), timeout=timeout)
+        if not response.ok:
+            try:
+                detail = response.json().get("detail", response.text)
+            except ValueError:
+                detail = response.text
+            raise BackendError(detail)
+        return response.content
+
     # --- auth ---
     def register(self, username: str, password: str, full_name: str, email: str, organisation_name: str) -> dict:
         return self._request(
@@ -89,6 +99,27 @@ class BackendClient:
 
     def set_scheme_active(self, scheme_id: int, is_active: bool) -> dict:
         return self._request("PATCH", f"/api/v1/schemes/{scheme_id}/active", params={"is_active": is_active})
+
+    def propose_scheme_update(
+        self, scheme_id: int, name: str, description: str, eligibility: str, required_documents: str
+    ) -> dict:
+        """Stages an edit to an existing scheme; needs >= 2 distinct admin approvals to apply."""
+        return self._request(
+            "PUT",
+            f"/api/v1/schemes/{scheme_id}",
+            json={
+                "name": name,
+                "description": description,
+                "eligibility": eligibility,
+                "required_documents": required_documents,
+            },
+        )
+
+    def approve_scheme_update(self, scheme_id: int) -> dict:
+        return self._request("POST", f"/api/v1/schemes/{scheme_id}/approve-update")
+
+    def list_scheme_update_approvals(self, scheme_id: int) -> list[dict]:
+        return self._request("GET", f"/api/v1/schemes/{scheme_id}/update-approvals")
 
     # --- applications ---
     def submit_application(
@@ -156,6 +187,14 @@ class BackendClient:
 
     def list_score_approvals(self, application_id: int) -> list[dict]:
         return self._request("GET", f"/api/v1/applications/{application_id}/score/approvals")
+
+    def list_submission_files(self, application_id: int) -> list[dict]:
+        """Manifest (index/filename/size) of originally uploaded files for previewing."""
+        return self._request("GET", f"/api/v1/applications/{application_id}/files")
+
+    def get_submission_file(self, application_id: int, file_index: int) -> bytes:
+        """Raw bytes of one originally uploaded file, for previewing/downloading."""
+        return self._request_bytes(f"/api/v1/applications/{application_id}/files/{file_index}")
 
     def list_reviews(self, application_id: int) -> list[dict]:
         return self._request("GET", f"/api/v1/applications/{application_id}/reviews")

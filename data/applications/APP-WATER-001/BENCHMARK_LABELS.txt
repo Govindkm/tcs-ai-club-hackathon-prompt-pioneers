@@ -1,0 +1,12 @@
+EVALUATION METADATA ONLY - do not upload as an application document
+and do not use as runtime analysis input.
+
+{
+  "coverage": [
+    "complete"
+  ],
+  "expected_completeness": "complete",
+  "expected_risk": "low",
+  "expected_reviewer_action": "proceed_to_scoring",
+  "ground_truth_note": "Complete, coherent case with permissions, baseline, measurable outcomes, and monitoring ownership."
+}

@@ -25,12 +25,12 @@ def _safe_filename(name: str) -> str:
     return _SAFE_NAME_RE.sub("_", name) or "upload"
 
 
-def save_uploaded_files(submission_id: int, files: list[tuple[str, bytes]]) -> list[dict]:
-    """Write each uploaded file to a per-submission folder on disk; returns a manifest
-    (original filename + stored path + size) to persist alongside the submission."""
+def save_uploaded_files(scheme_id: int, submission_id: int, files: list[tuple[str, bytes]]) -> list[dict]:
+    """Write each uploaded file to a per-scheme/per-submission folder on disk; returns a
+    manifest (original filename + stored path + size) to persist alongside the submission."""
     if not files:
         return []
-    folder = _upload_root() / str(submission_id)
+    folder = _upload_root() / str(scheme_id) / str(submission_id)
     folder.mkdir(parents=True, exist_ok=True)
     manifest = []
     for index, (filename, content) in enumerate(files):

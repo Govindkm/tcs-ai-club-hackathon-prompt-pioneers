@@ -18,6 +18,7 @@ def test_skills_directory_has_expected_packages():
         "explainable-scoring",
         "reviewer-workflow",
         "embedding-storage",
+        "scheme-scoring-design",
     }
 
 

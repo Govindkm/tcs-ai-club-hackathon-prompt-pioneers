@@ -1,0 +1,17 @@
+EVALUATION METADATA ONLY - do not upload as an application document
+and do not use as runtime analysis input.
+
+{
+  "coverage": [
+    "incomplete",
+    "low_quality"
+  ],
+  "expected_completeness": "incomplete",
+  "expected_risk": "medium",
+  "expected_reviewer_action": "request_more_information",
+  "missing_documents": [
+    "permissions_or_no_objection",
+    "monitoring_plan"
+  ],
+  "ground_truth_note": "The idea is relevant but lacks permission evidence, measurable baseline, operating ownership, and a usable monitoring plan."
+}

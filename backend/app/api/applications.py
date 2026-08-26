@@ -21,11 +21,12 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import mimetypes
 import threading
 from typing import Callable
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 
 from backend.app.schemas import (
     AnalysisEventOut,
@@ -143,10 +144,13 @@ def run_ingestion_job(submission_id: int, files: list[tuple[str, bytes]], pasted
     db.set_analysis_status(submission_id, "running", stage="ingestion")
     sink = _make_sink(submission_id)
     try:
+        submission = db.get_submission(submission_id)
+
         # Persist the raw uploads (idempotent - same content, same paths) + pasted
         # text so this ingestion (including OCR) can be retried later without a
         # re-upload, even for pasted-text-only submissions (empty raw_files list).
-        raw_files = save_uploaded_files(submission_id, files)
+        # Stored per-scheme/per-submission so uploads stay organized by scheme too.
+        raw_files = save_uploaded_files(submission["scheme_id"], submission_id, files)
         db.save_raw_files(submission_id, raw_files, pasted_text)
 
         document_text, document_bundle = _ingest_documents(files, pasted_text, sink)
@@ -154,7 +158,6 @@ def run_ingestion_job(submission_id: int, files: list[tuple[str, bytes]], pasted
             raise ValueError("No extractable document content.")
         db.update_submission_documents(submission_id, document_text, document_bundle)
 
-        submission = db.get_submission(submission_id)
         scheme = db.get_scheme(submission["scheme_id"])
         pipeline = create_orchestrator(event_sink=sink)
         indexed = pipeline.index_and_check(
@@ -209,12 +212,14 @@ def run_extraction_and_validation_job(submission_id: int, admin_feedback: str = 
         extraction = pipeline.run_extraction(submission["document_text"], admin_feedback)
 
         db.set_timeline_stage(submission_id, STAGE_VALIDATION_RUNNING)
+        scheme = db.get_scheme(submission["scheme_id"])
         validation = pipeline.run_validation(
             extraction.extracted_fields,
             _REQUIRED_FIELDS,
             admin_feedback,
             plagiarism_summary=submission.get("plagiarism_result"),
             organisation_name=submission.get("applicant_organisation"),
+            scoring_pattern=scheme.get("scoring_pattern") if scheme else None,
         )
         db.save_extraction_and_validation(
             submission_id, extraction.extracted_fields, extraction.summary, validation.model_dump()
@@ -238,12 +243,14 @@ def run_validation_feedback_job(submission_id: int, feedback: str) -> None:
         db.set_analysis_status(submission_id, "running", stage="validation")
         submission = db.get_submission(submission_id)
         pipeline = create_orchestrator(event_sink=sink)
+        scheme = db.get_scheme(submission["scheme_id"])
         validation = pipeline.run_validation(
             submission.get("extracted_fields") or {},
             _REQUIRED_FIELDS,
             admin_feedback=feedback,
             plagiarism_summary=submission.get("plagiarism_result"),
             organisation_name=submission.get("applicant_organisation"),
+            scoring_pattern=scheme.get("scoring_pattern") if scheme else None,
         )
         db.save_validation_result(submission_id, validation.model_dump(), feedback=feedback)
         db.set_analysis_status(submission_id, "completed", stage="validation_done")
@@ -263,7 +270,10 @@ def run_scoring_job(submission_id: int) -> None:
         db.set_analysis_status(submission_id, "running", stage="scoring")
         submission = db.get_submission(submission_id)
         pipeline = create_orchestrator(event_sink=sink)
-        scoring = pipeline.run_scoring(submission.get("validation_result") or {})
+        scheme = db.get_scheme(submission["scheme_id"])
+        scoring = pipeline.run_scoring(
+            submission.get("validation_result") or {}, scoring_pattern=scheme.get("scoring_pattern") if scheme else None
+        )
         db.save_scoring_result(submission_id, scoring.score, scoring.explanation)
         db.set_analysis_status(submission_id, "completed", stage="scoring_done")
         db.set_timeline_stage(submission_id, STAGE_AWAITING_SCORE_APPROVAL)
@@ -497,3 +507,42 @@ async def stream_analysis_events(application_id: int, current_user: dict = Depen
             await asyncio.sleep(0.5)
 
     return StreamingResponse(_event_stream(), media_type="text/event-stream")
+
+
+@router.get("/{application_id}/files")
+def list_submission_files(application_id: int, current_user: dict = Depends(get_current_user)) -> list[dict]:
+    """Lightweight manifest (filename/size only, no server paths) so the UI can offer previews."""
+    submission = db.get_submission(application_id)
+    if submission is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Application not found")
+    _check_ownership(submission, current_user)
+    raw_files = submission.get("raw_files") or []
+    return [
+        {"index": index, "filename": entry["filename"], "size": entry.get("size", 0)}
+        for index, entry in enumerate(raw_files)
+    ]
+
+
+@router.get("/{application_id}/files/{file_index}")
+def get_submission_file(
+    application_id: int, file_index: int, current_user: dict = Depends(get_current_user)
+) -> Response:
+    """Streams one originally-uploaded raw file back for in-browser preview/download."""
+    submission = db.get_submission(application_id)
+    if submission is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Application not found")
+    _check_ownership(submission, current_user)
+    raw_files = submission.get("raw_files") or []
+    if file_index < 0 or file_index >= len(raw_files):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+    entry = raw_files[file_index]
+    try:
+        [(filename, content)] = load_uploaded_files([entry])
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    media_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+    )

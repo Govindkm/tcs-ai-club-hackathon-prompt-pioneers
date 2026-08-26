@@ -31,7 +31,20 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="Application Intelligence Platform API", version="1.0.0", lifespan=lifespan)
+app = FastAPI(
+    title="Application Intelligence Platform API",
+    description=(
+        "API-first application processing platform for submission ingestion, AI-assisted "
+        "extraction, validation, explainable scoring, and human review. AI output is "
+        "advisory; final decisions remain with authorized human reviewers."
+    ),
+    version="1.0.0",
+    contact={"name": "Prompt Pioneers"},
+    docs_url="/docs",
+    redoc_url="/redoc",
+    openapi_url="/openapi.json",
+    lifespan=lifespan,
+)
 
 app.add_middleware(
     CORSMiddleware,

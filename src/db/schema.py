@@ -24,7 +24,19 @@ CREATE TABLE IF NOT EXISTS schemes (
     required_documents TEXT NOT NULL DEFAULT '',
     is_active INTEGER NOT NULL DEFAULT 1,
     created_by INTEGER REFERENCES users(id),
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    pending_update TEXT,
+    pending_update_by INTEGER REFERENCES users(id),
+    pending_update_at TEXT,
+    scoring_pattern TEXT
+);
+
+CREATE TABLE IF NOT EXISTS scheme_update_approvals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    scheme_id INTEGER NOT NULL REFERENCES schemes(id),
+    admin_id INTEGER NOT NULL REFERENCES users(id),
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(scheme_id, admin_id)
 );
 
 CREATE TABLE IF NOT EXISTS submissions (
@@ -125,6 +137,15 @@ def init_db() -> None:
             conn.execute("ALTER TABLE submissions ADD COLUMN raw_files TEXT")
         if "pasted_text" not in columns:
             conn.execute("ALTER TABLE submissions ADD COLUMN pasted_text TEXT")
+        scheme_columns = {row[1] for row in conn.execute("PRAGMA table_info(schemes)").fetchall()}
+        if "pending_update" not in scheme_columns:
+            conn.execute("ALTER TABLE schemes ADD COLUMN pending_update TEXT")
+        if "pending_update_by" not in scheme_columns:
+            conn.execute("ALTER TABLE schemes ADD COLUMN pending_update_by INTEGER REFERENCES users(id)")
+        if "pending_update_at" not in scheme_columns:
+            conn.execute("ALTER TABLE schemes ADD COLUMN pending_update_at TEXT")
+        if "scoring_pattern" not in scheme_columns:
+            conn.execute("ALTER TABLE schemes ADD COLUMN scoring_pattern TEXT")
         conn.commit()
     finally:
         conn.close()

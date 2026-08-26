@@ -1,0 +1,18 @@
+EVALUATION METADATA ONLY - do not upload as an application document
+and do not use as runtime analysis input.
+
+{
+  "coverage": [
+    "low_quality",
+    "suspicious"
+  ],
+  "expected_completeness": "present_but_unusable",
+  "expected_risk": "high",
+  "expected_reviewer_action": "manual_verification",
+  "suspicious_indicators": [
+    "illegible certificate and consent",
+    "unverified financial screenshot",
+    "budget arithmetic not reproducible"
+  ],
+  "ground_truth_note": "Required document types are present, but evidence quality and authenticity indicators require human verification."
+}

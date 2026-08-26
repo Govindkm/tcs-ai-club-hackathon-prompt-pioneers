@@ -18,8 +18,9 @@ from typing import Callable
 
 from src.agents.extraction_agent import create_extraction_agent
 from src.agents.embedding_agent import create_embedding_agent
-from src.agents.results import EmbeddingIndexResult, ExtractionResult, ScoringResult, ValidationResult
+from src.agents.results import EmbeddingIndexResult, ExtractionResult, ScoringPatternResult, ScoringResult, ValidationResult
 from src.agents.scoring_agent import create_scoring_agent
+from src.agents.scoring_pattern_agent import create_scoring_pattern_agent
 from src.agents.validation_agent import create_validation_agent
 from src.agents.workflow_agent import create_workflow_agent
 from src.tools.embedding_tools import check_document_similarity, index_document_bundle
@@ -106,23 +107,46 @@ class ApplicationPipeline:
         admin_feedback: str = "",
         plagiarism_summary: dict | None = None,
         organisation_name: str | None = None,
+        scoring_pattern: dict | None = None,
     ) -> ValidationResult:
         feedback_note = f"\n\nAdmin feedback to incorporate: {admin_feedback}" if admin_feedback else ""
         plagiarism_note = (
             f"\n\nPlagiarism/duplicate-content check result: {plagiarism_summary}" if plagiarism_summary else ""
         )
         org_note = f"\n\nApplicant organisation name: {organisation_name}" if organisation_name else ""
+        scoring_pattern_note = (
+            f"\n\nThis scheme's scoring criteria (for context on what matters when assessing "
+            f"completeness/risk): {scoring_pattern}"
+            if scoring_pattern
+            else ""
+        )
         self._event_sink("validation", "stage_start", "Checking completeness and authenticity risk.")
         validation = self.validation_agent.structured_output(
             ValidationResult,
             "Validate completeness of these extracted fields against the required "
             f"fields {required_fields}, and flag any authenticity risks. "
-            f"Extracted fields: {extracted_fields}{plagiarism_note}{org_note}{feedback_note}",
+            f"Extracted fields: {extracted_fields}{plagiarism_note}{org_note}{scoring_pattern_note}{feedback_note}",
         )
         self._event_sink("validation", "stage_complete", validation.model_dump_json())
         return validation
 
-    def run_scoring(self, validation_result: dict, admin_feedback: str = "") -> ScoringResult:
+    def run_scoring(
+        self, validation_result: dict, admin_feedback: str = "", scoring_pattern: dict | None = None
+    ) -> ScoringResult:
+        feedback_note = f"\n\nAdmin feedback to incorporate: {admin_feedback}" if admin_feedback else ""
+        self._event_sink("scoring", "stage_start", "Computing an explainable advisory score.")
+        if scoring_pattern:
+            prompt = (
+                "Apply this scheme's own scoring pattern exactly - call apply_scheme_score with "
+                f"criteria={scoring_pattern.get('criteria', [])} and your assessed awarded value "
+                f"(0-100) per criterion name, justified by this validation result: "
+                f"{validation_result}{feedback_note}"
+            )
+        else:
+            prompt = f"Compute an explainable score from this validation result: {validation_result}{feedback_note}"
+        scoring = self.scoring_agent.structured_output(ScoringResult, prompt)
+        self._event_sink("scoring", "stage_complete", scoring.model_dump_json())
+        return scoring
         feedback_note = f"\n\nAdmin feedback to incorporate: {admin_feedback}" if admin_feedback else ""
         self._event_sink("scoring", "stage_start", "Computing an explainable advisory score.")
         scoring = self.scoring_agent.structured_output(
@@ -168,3 +192,31 @@ class ApplicationPipeline:
 
 def create_orchestrator(event_sink: EventSink | None = None) -> ApplicationPipeline:
     return ApplicationPipeline(event_sink=event_sink)
+
+
+def _normalize_weights(pattern: ScoringPatternResult) -> ScoringPatternResult:
+    """Rescale criteria weights to sum to exactly 100 (LLM output is sometimes off by rounding)."""
+    total = sum(c.weight for c in pattern.criteria)
+    if total <= 0 or abs(total - 100.0) < 0.5:
+        return pattern
+    factor = 100.0 / total
+    for criterion in pattern.criteria:
+        criterion.weight = round(criterion.weight * factor, 2)
+    return pattern
+
+
+def generate_scheme_scoring_pattern(
+    name: str, description: str, eligibility: str, required_documents: str
+) -> ScoringPatternResult:
+    """Analyzes a scheme's requirements and designs a transparent, weighted scoring
+    pattern - applied identically by validation/scoring agents to every submission
+    against this scheme, and shown to admins/applicants for transparency."""
+    agent = create_scoring_pattern_agent()
+    pattern = agent.structured_output(
+        ScoringPatternResult,
+        "Design a transparent, weighted scoring pattern for evaluating applications "
+        "submitted to this government scheme.\n\n"
+        f"Scheme name: {name}\nDescription: {description}\n"
+        f"Eligibility criteria: {eligibility}\nRequired documents: {required_documents}",
+    )
+    return _normalize_weights(pattern)

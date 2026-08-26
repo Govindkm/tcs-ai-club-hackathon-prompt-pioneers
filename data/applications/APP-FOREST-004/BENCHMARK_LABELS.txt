@@ -1,0 +1,16 @@
+EVALUATION METADATA ONLY - do not upload as an application document
+and do not use as runtime analysis input.
+
+{
+  "coverage": [
+    "borderline"
+  ],
+  "expected_completeness": "complete_with_condition",
+  "expected_risk": "medium",
+  "expected_reviewer_action": "conditional_human_review",
+  "borderline_factors": [
+    "land-rights consultation pending for part of site",
+    "strong plan includes a feasible exclusion condition"
+  ],
+  "ground_truth_note": "The case may proceed only with explicit confirmation that unresolved plots are excluded or rights are settled."
+}

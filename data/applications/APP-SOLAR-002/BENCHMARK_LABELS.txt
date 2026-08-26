@@ -1,0 +1,18 @@
+EVALUATION METADATA ONLY - do not upload as an application document
+and do not use as runtime analysis input.
+
+{
+  "coverage": [
+    "incomplete"
+  ],
+  "expected_completeness": "incomplete",
+  "expected_risk": "medium",
+  "expected_reviewer_action": "request_more_information",
+  "missing_documents": [
+    "registration_certificate",
+    "site_ownership_or_consent",
+    "match_funding_proof",
+    "recent_audited_financials"
+  ],
+  "ground_truth_note": "The proposal is plausible but cannot establish eligibility, site control, match funding, or financial capacity."
+}

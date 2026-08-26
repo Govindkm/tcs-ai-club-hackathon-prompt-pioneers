@@ -22,6 +22,11 @@ scoring_agent:
   tools: [scoring_tools]
   skills: [explainable-scoring]
 
+scoring_pattern_agent:
+  description: Analyzes a scheme's requirements and designs a transparent, weighted scoring pattern for its applications.
+  tools: []
+  skills: [scheme-scoring-design]
+
 workflow_agent:
   description: Routes cases to reviewers and manages audit trail; never finalizes decisions.
   tools: [workflow_tools]

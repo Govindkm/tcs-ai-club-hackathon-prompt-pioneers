@@ -9,6 +9,9 @@ from __future__ import annotations
 import streamlit as st
 
 from app.api_client import BackendError
+from app.analysis_view import render_ai_analysis
+from app.file_preview import render_submitted_files
+from app.scoring_pattern import render_scoring_pattern
 from app.state import get_client
 from app.timeline import render_timeline
 
@@ -59,6 +62,7 @@ def admin_submissions_view(user: dict) -> None:
         with st.expander(label):
             st.write(f"Submitted: {sub['created_at']}")
             render_timeline(sub)
+            render_submitted_files(client, sub["id"])
 
             assigned_label = sub.get("assigned_admin_name") or "Unassigned"
             st.caption(f"Assigned admin: **{assigned_label}**")
@@ -103,14 +107,8 @@ def admin_submissions_view(user: dict) -> None:
                         st.success("Assigned - extraction & validation started.")
                         st.rerun()
 
-            if sub.get("extracted_fields"):
-                st.markdown("**Extracted fields**")
-                st.json(sub["extracted_fields"])
-            if sub.get("summary"):
-                st.markdown(f"**Summary:** {sub['summary']}")
-            if sub.get("validation_result"):
-                st.markdown("**Validation result**")
-                st.json(sub["validation_result"])
+            if any(sub.get(key) for key in ("extracted_fields", "summary", "validation_result", "score")):
+                render_ai_analysis(sub, show_raw_details=True)
             if sub.get("validation_feedback"):
                 st.caption(f"Last feedback given: {sub['validation_feedback']}")
 
@@ -137,10 +135,6 @@ def admin_submissions_view(user: dict) -> None:
                         st.rerun()
                 else:
                     st.info(f"Awaiting {assigned_label}'s validation review.")
-
-            if sub.get("score") is not None:
-                st.markdown(f"**Advisory score:** {sub['score']}")
-                st.json(sub["score_explanation"])
 
             # --- Stage 3: score approval (any admin) ---
             if sub["timeline_stage"] in ("awaiting_score_approval", "completed"):
@@ -238,12 +232,62 @@ def admin_schemes_view(user: dict) -> None:
     st.divider()
     st.markdown("### Existing schemes")
     for scheme in client.list_schemes(active_only=False):
-        cols = st.columns([4, 1])
-        cols[0].write(f"**{scheme['name']}** — {'active' if scheme['is_active'] else 'inactive'}")
-        toggle_label = "Deactivate" if scheme["is_active"] else "Activate"
-        if cols[1].button(toggle_label, key=f"toggle_scheme_{scheme['id']}"):
-            client.set_scheme_active(scheme["id"], not scheme["is_active"])
-            st.rerun()
+        label = f"{scheme['name']} — {'active' if scheme['is_active'] else 'inactive'}"
+        if scheme.get("pending_update"):
+            label += " · ⏳ pending edit"
+        with st.expander(label):
+            st.write(scheme["description"])
+            if scheme["eligibility"]:
+                st.markdown(f"**Eligibility:** {scheme['eligibility']}")
+            if scheme["required_documents"]:
+                st.markdown(f"**Required documents:** {scheme['required_documents']}")
+            render_scoring_pattern(scheme.get("scoring_pattern"))
+
+            toggle_label = "Deactivate" if scheme["is_active"] else "Activate"
+            if st.button(toggle_label, key=f"toggle_scheme_{scheme['id']}"):
+                client.set_scheme_active(scheme["id"], not scheme["is_active"])
+                st.rerun()
+
+            if scheme.get("pending_update"):
+                pending = scheme["pending_update"]
+                st.info(
+                    f"⏳ Pending edit proposed by {scheme.get('pending_update_by_name') or 'an admin'} "
+                    f"({scheme.get('pending_update_at', '')}) - needs 2 distinct admin approvals to apply."
+                )
+                st.markdown("**Proposed changes:**")
+                st.json({k: v for k, v in pending.items() if k != "scoring_pattern"})
+                render_scoring_pattern(pending.get("scoring_pattern"), heading="📊 Proposed scoring pattern")
+                approvals = client.list_scheme_update_approvals(scheme["id"])
+                approver_ids = {a["admin_id"] for a in approvals}
+                st.caption(
+                    f"Approvals: {len(approvals)}/2 "
+                    + (", ".join(a["admin_name"] for a in approvals) if approvals else "none yet")
+                )
+                if user["id"] not in approver_ids:
+                    if st.button("👍 Approve this edit", key=f"approve_scheme_{scheme['id']}"):
+                        client.approve_scheme_update(scheme["id"])
+                        st.success("Approval recorded.")
+                        st.rerun()
+                else:
+                    st.caption("You already approved this edit.")
+            elif st.toggle("✏️ Edit this scheme", key=f"edit_toggle_{scheme['id']}"):
+                with st.form(f"edit_scheme_form_{scheme['id']}"):
+                    new_name = st.text_input("Scheme name", value=scheme["name"])
+                    new_description = st.text_area("Description", value=scheme["description"])
+                    new_eligibility = st.text_area("Eligibility criteria", value=scheme["eligibility"])
+                    new_required_documents = st.text_area(
+                        "Required documents", value=scheme["required_documents"]
+                    )
+                    propose = st.form_submit_button("Propose update (needs 2 admin approvals)")
+                if propose:
+                    if not new_name.strip() or not new_description.strip():
+                        st.error("Name and description are required.")
+                    else:
+                        client.propose_scheme_update(
+                            scheme["id"], new_name, new_description, new_eligibility, new_required_documents
+                        )
+                        st.success("Update proposed - awaiting admin approvals.")
+                        st.rerun()
 
 
 def admin_notifications_view(user: dict) -> None:

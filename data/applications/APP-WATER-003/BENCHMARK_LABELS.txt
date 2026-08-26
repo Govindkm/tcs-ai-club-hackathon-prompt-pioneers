@@ -1,0 +1,17 @@
+EVALUATION METADATA ONLY - do not upload as an application document
+and do not use as runtime analysis input.
+
+{
+  "coverage": [
+    "contradictory",
+    "borderline"
+  ],
+  "expected_completeness": "complete_with_contradictions",
+  "expected_risk": "medium",
+  "expected_reviewer_action": "clarify_before_scoring",
+  "contradictions": [
+    "60 hectares in form versus 45 hectares in concept and baseline",
+    "total cost is above the stated grant plus match only because the form describes a separate contribution without evidence"
+  ],
+  "ground_truth_note": "The evidence is substantial, but scope, cost composition, and pending permission need human clarification."
+}

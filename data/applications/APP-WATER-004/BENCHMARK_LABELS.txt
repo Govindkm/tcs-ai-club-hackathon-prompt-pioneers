@@ -1,0 +1,19 @@
+EVALUATION METADATA ONLY - do not upload as an application document
+and do not use as runtime analysis input.
+
+{
+  "coverage": [
+    "suspicious",
+    "borderline"
+  ],
+  "expected_completeness": "complete_but_flagged",
+  "expected_risk": "high",
+  "expected_reviewer_action": "manual_verification",
+  "suspicious_indicators": [
+    "permission letter lacks traceable issuer and reference",
+    "company is newly registered",
+    "generic baseline",
+    "grant request exceeds scheme maximum by INR 100,000"
+  ],
+  "ground_truth_note": "Possible hard stop due to funding limit and authenticity concern; do not reject automatically without human review."
+}

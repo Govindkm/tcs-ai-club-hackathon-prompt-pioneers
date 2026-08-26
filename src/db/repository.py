@@ -27,6 +27,14 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
     return dict(row)
 
 
+def _parse_scheme_json(scheme: dict) -> dict:
+    if scheme.get("pending_update"):
+        scheme["pending_update"] = json.loads(scheme["pending_update"])
+    if scheme.get("scoring_pattern"):
+        scheme["scoring_pattern"] = json.loads(scheme["scoring_pattern"])
+    return scheme
+
+
 # ---------------------------------------------------------------------------
 # Users / auth
 # ---------------------------------------------------------------------------
@@ -164,7 +172,7 @@ def list_schemes(active_only: bool = True) -> list[dict]:
         rows = conn.execute(query, params).fetchall()
     finally:
         conn.close()
-    return [_row_to_dict(r) for r in rows]
+    return [_parse_scheme_json(_row_to_dict(r)) for r in rows]
 
 
 def get_scheme(scheme_id: int) -> dict | None:
@@ -173,13 +181,95 @@ def get_scheme(scheme_id: int) -> dict | None:
         row = conn.execute("SELECT * FROM schemes WHERE id = ?", (scheme_id,)).fetchone()
     finally:
         conn.close()
-    return _row_to_dict(row) if row else None
+    return _parse_scheme_json(_row_to_dict(row)) if row else None
 
 
 def set_scheme_active(scheme_id: int, is_active: bool) -> None:
     conn = get_connection()
     try:
         conn.execute("UPDATE schemes SET is_active = ? WHERE id = ?", (int(is_active), scheme_id))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def set_scheme_scoring_pattern(scheme_id: int, scoring_pattern: dict) -> None:
+    conn = get_connection()
+    try:
+        conn.execute(
+            "UPDATE schemes SET scoring_pattern = ? WHERE id = ?", (json.dumps(scoring_pattern), scheme_id)
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def propose_scheme_update(scheme_id: int, updates: dict, admin_id: int) -> None:
+    """Stage a scheme edit as a pending update (not applied yet) and reset any prior
+    approvals - it needs fresh approvals from >= 2 distinct admins to take effect."""
+    conn = get_connection()
+    try:
+        conn.execute(
+            "UPDATE schemes SET pending_update = ?, pending_update_by = ?, "
+            "pending_update_at = datetime('now') WHERE id = ?",
+            (json.dumps(updates), admin_id, scheme_id),
+        )
+        conn.execute("DELETE FROM scheme_update_approvals WHERE scheme_id = ?", (scheme_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def add_scheme_update_approval(scheme_id: int, admin_id: int) -> int:
+    """Record a distinct admin's approval of the pending scheme update; returns the
+    total distinct-approval count."""
+    conn = get_connection()
+    try:
+        conn.execute(
+            "INSERT OR IGNORE INTO scheme_update_approvals (scheme_id, admin_id) VALUES (?, ?)",
+            (scheme_id, admin_id),
+        )
+        conn.commit()
+        count = conn.execute(
+            "SELECT COUNT(*) AS c FROM scheme_update_approvals WHERE scheme_id = ?", (scheme_id,)
+        ).fetchone()["c"]
+        return count
+    finally:
+        conn.close()
+
+
+def list_scheme_update_approvals(scheme_id: int) -> list[dict]:
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT sa.*, u.full_name AS admin_name FROM scheme_update_approvals sa "
+            "JOIN users u ON sa.admin_id = u.id WHERE sa.scheme_id = ? ORDER BY sa.created_at ASC",
+            (scheme_id,),
+        ).fetchall()
+    finally:
+        conn.close()
+    return [_row_to_dict(r) for r in rows]
+
+
+def apply_pending_scheme_update(scheme_id: int, updates: dict) -> None:
+    """Apply an approved pending update (incl. its freshly-designed scoring pattern) to
+    the live scheme fields and clear the pending-update/approval state."""
+    conn = get_connection()
+    try:
+        conn.execute(
+            "UPDATE schemes SET name = ?, description = ?, eligibility = ?, required_documents = ?, "
+            "scoring_pattern = ?, pending_update = NULL, pending_update_by = NULL, pending_update_at = NULL "
+            "WHERE id = ?",
+            (
+                updates["name"],
+                updates["description"],
+                updates["eligibility"],
+                updates["required_documents"],
+                json.dumps(updates["scoring_pattern"]) if updates.get("scoring_pattern") else None,
+                scheme_id,
+            ),
+        )
+        conn.execute("DELETE FROM scheme_update_approvals WHERE scheme_id = ?", (scheme_id,))
         conn.commit()
     finally:
         conn.close()

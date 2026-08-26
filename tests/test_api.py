@@ -17,7 +17,14 @@ from fastapi.testclient import TestClient
 
 from backend.app.main import app
 import backend.app.api.applications as applications_module
-from src.agents.results import EmbeddingIndexResult, ExtractionResult, ScoringResult, ValidationResult
+import backend.app.api.schemes as schemes_module
+from src.agents.results import (
+    EmbeddingIndexResult,
+    ExtractionResult,
+    ScoringPatternResult,
+    ScoringResult,
+    ValidationResult,
+)
 from src.db import repository as db
 from src.tools.document_tools import extract_fields, summarize_document
 from src.tools.scoring_tools import apply_rule_score
@@ -54,7 +61,13 @@ class _FakePipeline:
         return ExtractionResult(extracted_fields=extracted, summary=summary)
 
     def run_validation(
-        self, extracted_fields, required_fields, admin_feedback="", plagiarism_summary=None, organisation_name=None
+        self,
+        extracted_fields,
+        required_fields,
+        admin_feedback="",
+        plagiarism_summary=None,
+        organisation_name=None,
+        scoring_pattern=None,
     ) -> ValidationResult:
         self._event_sink("validation", "stage_start", "Validating completeness.")
         completeness = check_completeness(extracted_fields, required_fields)
@@ -70,7 +83,7 @@ class _FakePipeline:
         self._event_sink("validation", "stage_complete", validation.model_dump_json())
         return validation
 
-    def run_scoring(self, validation_result: dict, admin_feedback: str = "") -> ScoringResult:
+    def run_scoring(self, validation_result: dict, admin_feedback: str = "", scoring_pattern=None) -> ScoringResult:
         self._event_sink("scoring", "stage_start", "Computing score.")
         scoring = apply_rule_score(validation_result)
         self._event_sink("scoring", "stage_complete", str(scoring))
@@ -84,6 +97,17 @@ def isolated_env(tmp_path, monkeypatch):
     monkeypatch.setenv("JWT_SECRET_KEY", "test-secret-key-for-unit-tests-only-0123456789")
     monkeypatch.setenv("STRANDS_TRACE_CONSOLE", "false")
     monkeypatch.setattr(applications_module, "create_orchestrator", lambda event_sink=None: _FakePipeline(event_sink))
+    monkeypatch.setattr(
+        schemes_module,
+        "generate_scheme_scoring_pattern",
+        lambda name, description, eligibility, required_documents: ScoringPatternResult(
+            criteria=[
+                {"name": "Eligibility fit", "weight": 60.0, "rationale": "Matches scheme eligibility."},
+                {"name": "Completeness", "weight": 40.0, "rationale": "All required documents present."},
+            ],
+            summary="Stub scoring pattern for tests.",
+        ),
+    )
     # Run every background job synchronously instead of on a detached thread, so
     # assertions right after client.post() reflect the completed job.
     monkeypatch.setattr(
@@ -219,6 +243,50 @@ def test_admin_can_create_scheme_and_applicant_can_list_it(client):
     applicant_headers = {"Authorization": f"Bearer {applicant['access_token']}"}
     schemes = client.get("/api/v1/schemes", headers=applicant_headers).json()
     assert any(s["id"] == scheme_id for s in schemes)
+
+
+def test_scheme_edit_requires_two_distinct_admin_approvals(client):
+    admin1 = _admin_headers(client, "sadmin1", "Sup3rSecret!")
+    admin2 = _admin_headers(client, "sadmin2", "Sup3rSecret!")
+    scheme_id = _create_scheme(client, admin1)
+
+    applicant = _register_and_login(client)
+    applicant_headers = {"Authorization": f"Bearer {applicant['access_token']}"}
+    forbidden = client.put(
+        f"/api/v1/schemes/{scheme_id}",
+        json={"name": "New name", "description": "d2", "eligibility": "e2", "required_documents": "doc2"},
+        headers=applicant_headers,
+    )
+    assert forbidden.status_code == 403
+
+    proposed = client.put(
+        f"/api/v1/schemes/{scheme_id}",
+        json={"name": "New name", "description": "d2", "eligibility": "e2", "required_documents": "doc2"},
+        headers=admin1,
+    )
+    assert proposed.status_code == 200
+    scheme = proposed.json()
+    assert scheme["name"] == "Grant"  # not applied yet
+    assert scheme["pending_update"]["name"] == "New name"
+
+    # Still not applied after a single approval (even the proposer's own).
+    first_approval = client.post(f"/api/v1/schemes/{scheme_id}/approve-update", headers=admin1)
+    assert first_approval.status_code == 200
+    assert first_approval.json()["name"] == "Grant"
+    assert first_approval.json()["pending_update"] is not None
+
+    approvals = client.get(f"/api/v1/schemes/{scheme_id}/update-approvals", headers=admin1).json()
+    assert len(approvals) == 1
+
+    # A second, distinct admin's approval applies the update.
+    second_approval = client.post(f"/api/v1/schemes/{scheme_id}/approve-update", headers=admin2)
+    assert second_approval.status_code == 200
+    applied = second_approval.json()
+    assert applied["name"] == "New name"
+    assert applied["pending_update"] is None
+
+    approvals_after = client.get(f"/api/v1/schemes/{scheme_id}/update-approvals", headers=admin1).json()
+    assert approvals_after == []
 
 
 def test_submit_application_runs_ingestion_and_is_owner_isolated(client):
@@ -603,3 +671,40 @@ def test_non_admin_cannot_manage_users(client):
         json={"username": "hacker_admin", "password": "Sup3rSecret!", "full_name": "Hacker"},
         headers=applicant_headers,
     ).status_code == 403
+
+
+def test_owner_and_admin_can_preview_submitted_files_but_others_cannot(client):
+    admin_headers = _admin_headers(client)
+    scheme_id = _create_scheme(client, admin_headers)
+    dave = _register_and_login(client, "dave13", "Sup3rSecret!")
+    dave_headers = {"Authorization": f"Bearer {dave['access_token']}"}
+    eve = _register_and_login(client, "eve13", "Sup3rSecret!")
+    eve_headers = {"Authorization": f"Bearer {eve['access_token']}"}
+
+    resp = client.post(
+        "/api/v1/applications",
+        data={"scheme_id": scheme_id, "notes": ""},
+        files=[("files", ("notes.txt", b"Rs. 2,000 on 03/03/2025", "text/plain"))],
+        headers=dave_headers,
+    )
+    assert resp.status_code == 201
+    submission_id = resp.json()["id"]
+
+    manifest = client.get(f"/api/v1/applications/{submission_id}/files", headers=dave_headers)
+    assert manifest.status_code == 200
+    files = manifest.json()
+    assert len(files) == 1
+    assert files[0]["filename"] == "notes.txt"
+
+    file_resp = client.get(f"/api/v1/applications/{submission_id}/files/0", headers=dave_headers)
+    assert file_resp.status_code == 200
+    assert file_resp.content == b"Rs. 2,000 on 03/03/2025"
+
+    admin_manifest = client.get(f"/api/v1/applications/{submission_id}/files", headers=admin_headers)
+    assert admin_manifest.status_code == 200
+
+    forbidden = client.get(f"/api/v1/applications/{submission_id}/files", headers=eve_headers)
+    assert forbidden.status_code == 403
+
+    missing = client.get(f"/api/v1/applications/{submission_id}/files/5", headers=dave_headers)
+    assert missing.status_code == 404

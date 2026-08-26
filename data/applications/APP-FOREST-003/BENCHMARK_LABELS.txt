@@ -1,0 +1,18 @@
+EVALUATION METADATA ONLY - do not upload as an application document
+and do not use as runtime analysis input.
+
+{
+  "coverage": [
+    "duplicate",
+    "suspicious"
+  ],
+  "expected_completeness": "complete_but_flagged",
+  "expected_risk": "high",
+  "expected_reviewer_action": "duplicate_review",
+  "duplicate_of": "APP-FOREST-001",
+  "suspicious_indicators": [
+    "identical baseline measurements and sample identifiers",
+    "copied safeguard plan with another applicant's staff names"
+  ],
+  "ground_truth_note": "Document types are complete, but cross-application similarity and identity mismatch require human investigation."
+}

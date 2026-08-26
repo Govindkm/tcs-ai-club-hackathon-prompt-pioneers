@@ -1,4 +1,4 @@
-"""Seed the local SQLite DB with a default admin user and sample schemes.
+"""Seed the local SQLite DB with a default admin user.
 
 Run once before demoing: python scripts/seed_db.py
 """
@@ -15,22 +15,6 @@ from src.db.schema import init_db
 
 _DEFAULT_ADMIN_PASSWORD = "ChangeMe123!"
 
-_SAMPLE_SCHEMES = [
-    (
-        "Green Energy Grant",
-        "Funding for renewable micro-grid projects in rural communities.",
-        "Registered cooperatives or NGOs operating in eligible districts.",
-        "Project proposal, budget breakdown, registration certificate",
-    ),
-    (
-        "Reforestation Support Scheme",
-        "Grants for community-led reforestation and afforestation drives.",
-        "Community groups with at least 2 years of prior environmental activity.",
-        "Land use certificate, project plan, prior activity report",
-    ),
-]
-
-
 def main() -> None:
     init_db()
 
@@ -43,11 +27,7 @@ def main() -> None:
     except ValueError:
         print("Admin user already exists, skipping.")
 
-    existing_names = {s["name"] for s in db.list_schemes(active_only=False)}
-    for name, description, eligibility, docs in _SAMPLE_SCHEMES:
-        if name not in existing_names:
-            db.create_scheme(name, description, eligibility, docs, created_by=None)
-    print("Seed complete.")
+    print("Seed complete. No schemes were created; add schemes through the system before submitting applications.")
 
 
 if __name__ == "__main__":

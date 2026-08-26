@@ -1,0 +1,20 @@
+EVALUATION METADATA ONLY - do not upload as an application document
+and do not use as runtime analysis input.
+
+{
+  "coverage": [
+    "incomplete",
+    "borderline"
+  ],
+  "expected_completeness": "incomplete",
+  "expected_risk": "medium",
+  "expected_reviewer_action": "request_more_information",
+  "missing_documents": [
+    "safeguard_and_grievance_plan"
+  ],
+  "material_gaps": [
+    "land access is not legally confirmed",
+    "baseline lacks measurable indicators"
+  ],
+  "ground_truth_note": "Potentially eligible, but land rights and safeguards must be established before assessment."
+}

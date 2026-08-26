@@ -103,7 +103,7 @@ The POC must demonstrate every normalized capability from the eight relevant pro
 │   ├── adapters/          # Mock adapters (schemes portal, messaging, identity)
 │   └── telemetry.py        # OpenTelemetry tracing setup (console/OTLP exporters)
 ├── scripts/
-│   ├── seed_db.py             # Creates a default admin user + sample schemes
+│   ├── seed_db.py             # Creates a default admin user only
 │   └── run_pipeline_demo.py  # End-to-end demo of the agent pipeline
 ├── backend/
 │   └── app/
@@ -304,7 +304,7 @@ Copy-Item .env.example .env
 # 3. Run unit tests (no live model/backend calls needed)
 pytest
 
-# 4. Seed the local SQLite DB with a default admin user + sample schemes
+# 4. Seed the local SQLite DB with a default admin user (does not create schemes)
 python scripts/seed_db.py
 
 # 5. Start the FastAPI backend (owns all business logic)

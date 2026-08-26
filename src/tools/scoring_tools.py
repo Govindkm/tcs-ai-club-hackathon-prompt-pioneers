@@ -34,4 +34,40 @@ def apply_rule_score(validation_result: dict, weights: dict | None = None) -> di
     }
 
 
-TOOLS = [apply_rule_score]
+@tool
+def apply_scheme_score(criteria: list[dict], awarded: dict) -> dict:
+    """Compute an explainable weighted score from a scheme's own scoring pattern.
+
+    Args:
+        criteria: The scheme's scoring pattern criteria, each a dict with
+            "name", "weight" (0-100), and "rationale". All weights sum to ~100.
+        awarded: Map of criterion name -> awarded value (0-100), the percentage
+            of that criterion's weight the submission earned based on your review.
+    """
+    breakdown = []
+    total_score = 0.0
+    for criterion in criteria:
+        name = criterion.get("name", "")
+        weight = float(criterion.get("weight", 0))
+        awarded_value = max(0.0, min(100.0, float(awarded.get(name, 0.0))))
+        contribution = round(weight * awarded_value / 100.0, 3)
+        total_score += contribution
+        breakdown.append(
+            {
+                "criterion": name,
+                "weight": weight,
+                "awarded": awarded_value,
+                "weighted_contribution": contribution,
+                "rationale": criterion.get("rationale", ""),
+            }
+        )
+    return {
+        "score": round(total_score, 3),
+        "explanation": {
+            "criteria": breakdown,
+            "total_weight": round(sum(float(c.get("weight", 0)) for c in criteria), 3),
+        },
+    }
+
+
+TOOLS = [apply_rule_score, apply_scheme_score]

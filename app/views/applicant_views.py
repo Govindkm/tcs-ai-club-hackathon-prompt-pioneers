@@ -9,6 +9,9 @@ from __future__ import annotations
 import streamlit as st
 
 from app.api_client import BackendError
+from app.analysis_view import render_ai_analysis
+from app.file_preview import render_submitted_files
+from app.scoring_pattern import render_scoring_pattern
 from app.state import get_client
 from app.timeline import render_timeline
 
@@ -34,6 +37,7 @@ def schemes_view() -> None:
                 st.markdown(f"**Eligibility:** {scheme['eligibility']}")
             if scheme["required_documents"]:
                 st.markdown(f"**Required documents:** {scheme['required_documents']}")
+            render_scoring_pattern(scheme.get("scoring_pattern"), heading="📊 How applications are scored")
 
 
 def submit_view(user: dict) -> None:
@@ -89,16 +93,15 @@ def my_submissions_view(user: dict) -> None:
         with st.expander(label):
             st.write(f"Submitted: {sub['created_at']}")
             render_timeline(sub)
+            render_submitted_files(client, sub["id"])
             if sub.get("assigned_admin_name"):
                 st.caption(f"Being handled by: {sub['assigned_admin_name']}")
             if sub["analysis_status"] in ("queued", "running"):
                 st.info("Your application is being analyzed by our AI review pipeline...")
             elif sub["analysis_status"] == "failed":
                 st.warning("Analysis hit a temporary issue; a reviewer will follow up shortly.")
-            if sub.get("summary"):
-                st.markdown(f"**Summary:** {sub['summary']}")
-            if sub.get("score") is not None:
-                st.markdown(f"**Advisory score:** {sub['score']}")
+            if any(sub.get(key) for key in ("extracted_fields", "summary", "validation_result", "score")):
+                render_ai_analysis(sub)
             if sub["timeline_stage"] == "completed":
                 st.success("Score approved by admins - your submission's review timeline is complete.")
 

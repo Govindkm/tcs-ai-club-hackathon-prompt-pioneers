@@ -1,7 +1,7 @@
 """Unit tests for tool logic - no live model calls, pure function tests."""
 from src.tools import verification_tools
 from src.tools.document_tools import extract_fields, summarize_document
-from src.tools.scoring_tools import apply_rule_score
+from src.tools.scoring_tools import apply_rule_score, apply_scheme_score
 from src.tools.validation_tools import check_completeness, flag_authenticity_risks
 from src.tools.workflow_tools import get_audit_trail, record_review_decision, route_to_reviewer
 
@@ -70,6 +70,27 @@ def test_apply_rule_score_penalizes_risk():
     result = apply_rule_score({"is_complete": True, "requires_human_review": True})
     assert result["score"] < 0.6
     assert "explanation" in result
+
+
+def test_apply_scheme_score_computes_weighted_breakdown():
+    criteria = [
+        {"name": "Eligibility fit", "weight": 60.0, "rationale": "Matches scheme eligibility."},
+        {"name": "Completeness", "weight": 40.0, "rationale": "All required documents present."},
+    ]
+    result = apply_scheme_score(criteria, {"Eligibility fit": 100.0, "Completeness": 50.0})
+    assert result["score"] == 80.0
+    breakdown = {c["criterion"]: c for c in result["explanation"]["criteria"]}
+    assert breakdown["Eligibility fit"]["weighted_contribution"] == 60.0
+    assert breakdown["Completeness"]["weighted_contribution"] == 20.0
+
+
+def test_apply_scheme_score_clamps_and_defaults_missing_awards():
+    criteria = [{"name": "Risk controls", "weight": 100.0, "rationale": "x"}]
+    result = apply_scheme_score(criteria, {"Risk controls": 150.0})
+    assert result["score"] == 100.0
+
+    result_missing = apply_scheme_score(criteria, {})
+    assert result_missing["score"] == 0.0
 
 
 def test_route_to_reviewer_requires_pool():
