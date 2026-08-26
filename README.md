@@ -72,9 +72,10 @@ The POC must demonstrate every normalized capability from the eight relevant pro
 ## Documentation
 
 - [Architecture overview](docs/architecture.md) - detailed component boundaries, data flows, persistence, security, and Mermaid diagrams.
+- [UI, API, and backend flows](docs/ui-api-flows.md) - applicant submission and admin review interaction diagrams with the routes and guards behind each step.
 - [Developer guide](docs/developer-guide.md) - local setup, day-to-day workflows, testing, configuration, and extension patterns.
 
-The README is the quick orientation. The two documents above are the detailed guides for maintaining and extending the current implementation.
+The README is the quick orientation. The documents above are the detailed guides for maintaining and extending the current implementation.
 
 ---
 
